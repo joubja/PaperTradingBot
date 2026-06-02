@@ -500,6 +500,15 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                         }
                         else
                         {
+                            // Trial mode: sell half the normal quantity after a timeout re-enable
+                            if (cs.TrialMode)
+                            {
+                                sellQty = RoundDownToStep(sellQty * 0.5m, symbolConfig?.QuantityStep ?? 0.001m);
+                                _logger.LogInformation(
+                                    "TRIAL MODE SELL | {Symbol} reduced qty={Qty:F5} (50% of normal) — suspension #{Count}",
+                                    symbol, sellQty, cs.SuspensionCount);
+                            }
+
                             _logger.LogInformation(
                                 "CYCLE SELL | {Symbol} RSI={Rsi:F1} SellQty={Qty:F5} SellPct={Pct:P0} Price={Price:F4} Abandon>{Abandon:P1} ATR={Atr:F6}",
                                 symbol, rsi, sellQty, adaptiveSellPct, close, adaptiveAbandon, atr);
@@ -558,12 +567,46 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
         } // end else if (sellSignal)
 
         // ── Normal BuildEth accumulation ──────────────────────────────────────
-        // Re-enable cycling if a deep dip arrives
-        if (!_cyclingEnabled && rsi < cyclingReenableRsi)
+        // Graduated cycling re-enable:
+        //   Primary  — RSI < cyclingReenableRsi (deep dip, immediate full re-enable)
+        //   Tier 1   — 3h elapsed + (RSI < 50 OR volatile ATR): soft re-enable
+        //   Tier 2   — 9h elapsed: trial mode re-enable (50 % sell qty)
+        //   Tier 3   — 24h elapsed: force full re-enable regardless
+        // Data basis: observed max inter-cycle gap is 21h; median ~5h.
+        if (!_cyclingEnabled)
         {
-            _cyclingEnabled = true;
-            _logger.LogInformation("CYCLING RE-ENABLED | RSI={Rsi:F1} deep dip", rsi);
-            PushCyclingState(symbol);
+            var suspendedHours = cs.SuspendedAt > DateTime.MinValue
+                ? (DateTime.UtcNow - cs.SuspendedAt).TotalHours
+                : 0d;
+            var atrPct = close > 0m ? atr / close : 0m;
+            var marketIsVolatile = atrPct > ReferenceAtrPct * 1.5m;
+
+            bool primaryReEnable = rsi < cyclingReenableRsi;
+            bool tier1ReEnable   = suspendedHours >= 3d  && (rsi < 50m || marketIsVolatile);
+            bool tier2ReEnable   = suspendedHours >= 9d;
+            bool tier3ReEnable   = suspendedHours >= 24d;
+
+            if (primaryReEnable || tier1ReEnable || tier2ReEnable || tier3ReEnable)
+            {
+                _cyclingEnabled  = true;
+                cs.TrialMode     = !primaryReEnable;  // timeout re-enables use trial mode
+
+                var reason = tier3ReEnable   ? $"24h hard timeout (suspension #{cs.SuspensionCount})" :
+                             tier2ReEnable   ? $"9h timeout — trial mode" :
+                             tier1ReEnable   ? $"3h timeout — RSI={rsi:F1} volatile={marketIsVolatile}" :
+                                              $"RSI={rsi:F1} deep dip";
+
+                _logger.LogInformation(
+                    "CYCLING RE-ENABLED | {Symbol} reason={Reason} trial={Trial} suspensions={Count}",
+                    symbol, reason, cs.TrialMode, cs.SuspensionCount);
+
+                if (tier3ReEnable && cs.SuspensionCount >= 3)
+                    _logger.LogWarning(
+                        "CYCLING REPEATEDLY SUSPENDED | {Symbol} {Count} consecutive suspensions — strategy may need review",
+                        symbol, cs.SuspensionCount);
+
+                PushCyclingState(symbol);
+            }
         }
 
         var accumStep = GetSymbolConfig(symbol)?.QuantityStep ?? 0.001m;
@@ -613,7 +656,9 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
             {
                 "Cooldown"         => $"Cooldown — {cs.CooldownBarsLeft} bars remaining | RSI={rsi:F1}",
                 "TrendFilter"      => $"Trend filter ON — cycle sells paused | RSI={rsi:F1} spread={spreadPct:F2}% ema50={trendEmaVal:F2}",
-                "CyclingSuspended" => $"Cycling suspended — RSI={rsi:F1} | re-enables at RSI <{cyclingReenableRsi:F0}",
+                "CyclingSuspended" => cs.SuspendedAt > DateTime.MinValue
+                    ? $"Cycling suspended #{cs.SuspensionCount} ({(DateTime.UtcNow - cs.SuspendedAt).TotalHours:F1}h) — RSI={rsi:F1} | primary <{cyclingReenableRsi:F0} | tier1 3h+RSI<50 | tier2 9h | hard 24h"
+                    : $"Cycling suspended — RSI={rsi:F1} | re-enables at RSI <{cyclingReenableRsi:F0}",
                 _                  => $"Watching — RSI={rsi:F1} | cycle sell >{rsiCycleSell:F0}, dip buy <{rsiDipBuy:F0}, EMA cross"
             };
 
@@ -648,12 +693,24 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
             // Abandoned cycles represent opportunity cost, not actual ETH loss, so they
             // don't signal deteriorating conditions — only loss-completed cycles count.
             var failures = cycles.Count(c => !c.IsAbandoned && !c.IsProfit);
+            if (!_cycleState.TryGetValue(symbol, out var cs)) return;
+
             if (failures >= 3 && _cyclingEnabled)
             {
-                _cyclingEnabled = false;
+                _cyclingEnabled    = false;
+                cs.SuspendedAt     = DateTime.UtcNow;
+                cs.SuspensionCount++;
                 _logger.LogWarning(
-                    "CYCLING SUSPENDED | {Failures}/{Total} recent cycles ended in ETH loss",
-                    failures, cycles.Count);
+                    "CYCLING SUSPENDED | {Failures}/{Total} recent cycles ended in ETH loss | suspension #{Count}",
+                    failures, cycles.Count, cs.SuspensionCount);
+            }
+            else if (_cyclingEnabled && cs.TrialMode && cycles.Any(c => c.IsProfit))
+            {
+                // Successful cycle after a timeout re-enable — exit trial mode and reset counter
+                cs.TrialMode       = false;
+                cs.SuspensionCount = 0;
+                _logger.LogInformation(
+                    "TRIAL MODE CLEARED | {Symbol} cycle succeeded — resuming normal sell sizes", symbol);
             }
         }
 
@@ -790,5 +847,10 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
         public decimal  PostAbandonSellPrice { get; set; }
         public decimal  PostAbandonSellQty   { get; set; }
         public DateTime PostAbandonSellTs    { get; set; }
+
+        // Suspension circuit-breaker state
+        public DateTime SuspendedAt       { get; set; }  // when cycling was last suspended
+        public int      SuspensionCount   { get; set; }  // consecutive suspensions without a win
+        public bool     TrialMode         { get; set; }  // sell at 50% qty after timeout re-enable
     }
 }
