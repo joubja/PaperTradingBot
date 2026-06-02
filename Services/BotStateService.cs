@@ -170,6 +170,8 @@ public class BotStateService
         OnStateChanged?.Invoke();
     }
 
+    public DateTime LastTradeAt { get; private set; } = DateTime.MinValue;
+
     public void NotifyTrade(Trade trade)
     {
         lock (_lock)
@@ -177,6 +179,7 @@ public class BotStateService
             RecentTrades.Insert(0, trade);
             if (RecentTrades.Count > 50) RecentTrades.RemoveAt(50);
             SessionCommission += trade.Commission;
+            LastTradeAt        = trade.Timestamp;
         }
         OnStateChanged?.Invoke();
     }

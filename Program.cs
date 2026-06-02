@@ -32,6 +32,7 @@ var services = builder.Services;
 services.Configure<BotOptions>(builder.Configuration.GetSection("Bot"));
 services.Configure<OptimizerOptions>(builder.Configuration.GetSection("Optimizer"));
 services.Configure<ClaudeAdvisorOptions>(builder.Configuration.GetSection("ClaudeAdvisor"));
+services.Configure<NotificationOptions>(builder.Configuration.GetSection("Notifications"));
 
 // ── HTTP clients (Claude API, etc.) ──────────────────────────────────────────
 services.AddHttpClient();
@@ -119,6 +120,10 @@ services.AddSingleton<BotController>();
 // ── Auto-start: starts the bot automatically when running as a service ────────
 services.AddHostedService<BotAutoStartService>();
 
+// ── Notifications ─────────────────────────────────────────────────────────────
+services.AddSingleton<NotificationService>();
+services.AddHostedService<BotMonitorService>();
+
 var app = builder.Build();
 
 // Recover any sessions left in Running state by previous crash
@@ -147,24 +152,51 @@ app.MapBlazorHub();
 app.MapFallbackToPage("/_Host");
 
 // ── Health endpoint ───────────────────────────────────────────────────────────
-app.MapGet("/health", (BotStateService state, LiveDemoRuntime runtime, BinanceLiveMarketDataFeed feed) =>
+app.MapGet("/health", (BotStateService state, LiveDemoRuntime runtime, BinanceLiveMarketDataFeed feed, DatabaseService db) =>
 {
     var now = DateTime.UtcNow;
 
-    var lastBar   = runtime.LastBarAt == DateTime.MinValue ? (TimeSpan?)null : now - runtime.LastBarAt;
-    var lastQuote = feed.LastQuoteAt  == DateTime.MinValue ? (TimeSpan?)null : now - feed.LastQuoteAt;
+    var lastBar      = runtime.LastBarAt  == DateTime.MinValue ? (TimeSpan?)null : now - runtime.LastBarAt;
+    var lastQuote    = feed.LastQuoteAt   == DateTime.MinValue ? (TimeSpan?)null : now - feed.LastQuoteAt;
+    var lastTradeAge = state.LastTradeAt  == DateTime.MinValue ? (TimeSpan?)null : now - state.LastTradeAt;
 
-    var status = state.IsRunning && lastBar < TimeSpan.FromMinutes(5) ? "healthy" : "degraded";
+    var barStale  = !lastBar.HasValue   || lastBar.Value   > TimeSpan.FromMinutes(5);
+    var status    = state.IsRunning && !barStale ? "healthy" : "degraded";
+
+    var ethQty  = state.Positions.TryGetValue("ETHUSDT", out var pos) ? pos.Quantity : 0m;
+    var ethGain = ethQty - state.StartingEth;
+
+    var (totalCycles, wins) = state.ActiveSessionId is not null
+        ? db.GetSessionCycleStats(state.ActiveSessionId)
+        : (0, 0);
 
     return Results.Json(new
     {
         status,
         bot = new
         {
-            isRunning   = state.IsRunning,
-            strategy    = state.ActiveStrategy,
-            sessionId   = state.ActiveSessionId,
-            lastBarAge  = lastBar.HasValue ? $"{lastBar.Value.TotalSeconds:F0}s" : "never"
+            isRunning    = state.IsRunning,
+            strategy     = state.ActiveStrategy,
+            sessionId    = state.ActiveSessionId,
+            uptime       = state.SessionStartedAt != DateTime.MinValue
+                               ? $"{(now - state.SessionStartedAt).TotalHours:F1}h" : "—",
+            lastBarAge   = lastBar.HasValue   ? $"{lastBar.Value.TotalSeconds:F0}s"   : "never",
+            lastTradeAge = lastTradeAge.HasValue ? $"{lastTradeAge.Value.TotalHours:F1}h" : "never"
+        },
+        portfolio = new
+        {
+            ethHeld      = ethQty,
+            ethGain,
+            cashUsdt     = state.Cash,
+            startingEth  = state.StartingEth
+        },
+        cycling = new
+        {
+            enabled        = state.CyclingEnabled,
+            phase          = state.StrategyStatus?.Phase,
+            status         = state.StrategyStatus?.Summary,
+            cyclesWon      = wins,
+            cyclesTotal    = totalCycles
         },
         feed = new
         {
