@@ -442,7 +442,10 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                         CycleId                = recoveryRowId  // runtime corrects DB with actual fill qty
                     };
                 }
-                // No cash available — abandon shadow state silently
+                // No cash available — log and abandon shadow state
+                _logger.LogWarning(
+                    "RECOVERY REBUY SKIPPED | {Symbol} rcvQty rounds to zero — no usable cash (cash={Cash:F2})",
+                    symbol, _portfolio.GetCash());
             }
             } // end else (recovery watch still active)
         }

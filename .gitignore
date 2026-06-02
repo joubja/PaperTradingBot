@@ -4,8 +4,7 @@ obj/
 publish/
 
 # Secrets & local config
-appsettings.*.json
-
+appsettings*.json
 *.pem
 *.key
 .env*
@@ -31,6 +30,11 @@ logs/
 output/
 *.csv
 
+# Native binaries (restored by build)
+*.dll
+
+# Runtime data
+data/
+
 # Claude Code memory
 memory/
-appsettings.json

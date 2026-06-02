@@ -310,6 +310,13 @@ public class DatabaseService : IDisposable
                   gain = (double)netGain, id = cycleId });
     }
 
+    /// <summary>
+    /// Removes a cycle row entirely — used when the order that was supposed to complete
+    /// it was rejected by the execution gateway, leaving the pre-written estimate invalid.
+    /// </summary>
+    public void DeleteCycleRow(int cycleId) =>
+        _conn.Execute("DELETE FROM CyclingCycles WHERE Id=@id", new { id = cycleId });
+
     public void MarkCycleAbandoned(int cycleId)
     {
         _conn.Execute("""

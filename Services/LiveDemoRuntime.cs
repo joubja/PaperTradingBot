@@ -314,6 +314,15 @@ public class LiveDemoRuntime : ITradingRuntime
                     request.Quantity,
                     fill.RejectionReason ?? "Unknown rejection");
 
+                // If the intent pre-wrote a cycle row (estimated qty), delete it so the DB
+                // doesn't contain a false completed cycle that never actually executed.
+                if (decision.Intent.CycleId.HasValue && !string.IsNullOrEmpty(_sessionId))
+                {
+                    _db.DeleteCycleRow(decision.Intent.CycleId.Value);
+                    _logger.LogWarning("CYCLE ROW DELETED | CycleId={Id} — fill rejected, pre-written estimate removed",
+                        decision.Intent.CycleId.Value);
+                }
+
                 RecordEquityPoint(candle.Timestamp);
                 return;
             }
