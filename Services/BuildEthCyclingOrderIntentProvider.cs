@@ -588,8 +588,10 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 
             if (primaryReEnable || tier1ReEnable || tier2ReEnable || tier3ReEnable)
             {
-                _cyclingEnabled  = true;
-                cs.TrialMode     = !primaryReEnable;  // timeout re-enables use trial mode
+                _cyclingEnabled   = true;
+                cs.SuspendedAt    = DateTime.MinValue;   // reset so next suspension times correctly
+                // Only Tier 2 and Tier 3 use trial mode — Tier 1 is a condition-based full re-enable
+                cs.TrialMode      = tier2ReEnable || tier3ReEnable;
 
                 var reason = tier3ReEnable   ? $"24h hard timeout (suspension #{cs.SuspensionCount})" :
                              tier2ReEnable   ? $"9h timeout — trial mode" :
@@ -600,7 +602,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     "CYCLING RE-ENABLED | {Symbol} reason={Reason} trial={Trial} suspensions={Count}",
                     symbol, reason, cs.TrialMode, cs.SuspensionCount);
 
-                if (tier3ReEnable && cs.SuspensionCount >= 3)
+                if (cs.SuspensionCount >= 3)
                     _logger.LogWarning(
                         "CYCLING REPEATEDLY SUSPENDED | {Symbol} {Count} consecutive suspensions — strategy may need review",
                         symbol, cs.SuspensionCount);
@@ -688,12 +690,11 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
         if (_state.ActiveSessionId is null) return;
 
         var cycles = _db.GetRecentCompleteCycles(_state.ActiveSessionId, limit: 5);
-        if (cycles.Count >= 3)
+        if (cycles.Count >= 3 && _cycleState.TryGetValue(symbol, out var cs))
         {
             // Abandoned cycles represent opportunity cost, not actual ETH loss, so they
             // don't signal deteriorating conditions — only loss-completed cycles count.
             var failures = cycles.Count(c => !c.IsAbandoned && !c.IsProfit);
-            if (!_cycleState.TryGetValue(symbol, out var cs)) return;
 
             if (failures >= 3 && _cyclingEnabled)
             {
@@ -704,13 +705,17 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     "CYCLING SUSPENDED | {Failures}/{Total} recent cycles ended in ETH loss | suspension #{Count}",
                     failures, cycles.Count, cs.SuspensionCount);
             }
-            else if (_cyclingEnabled && cs.TrialMode && cycles.Any(c => c.IsProfit))
+            else if (_cyclingEnabled && cycles.Any(c => c.IsProfit))
             {
-                // Successful cycle after a timeout re-enable — exit trial mode and reset counter
-                cs.TrialMode       = false;
+                // Profitable cycle — exit trial mode and reset suspension counter regardless
+                // of whether we came back via primary (RSI) or timed re-enable
+                if (cs.TrialMode)
+                {
+                    cs.TrialMode = false;
+                    _logger.LogInformation(
+                        "TRIAL MODE CLEARED | {Symbol} cycle succeeded — resuming normal sell sizes", symbol);
+                }
                 cs.SuspensionCount = 0;
-                _logger.LogInformation(
-                    "TRIAL MODE CLEARED | {Symbol} cycle succeeded — resuming normal sell sizes", symbol);
             }
         }
 
