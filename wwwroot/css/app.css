@@ -1,0 +1,65 @@
+html, body {
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: 'Roboto', sans-serif;
+}
+
+/* Metric card */
+.metric-card {
+    background: #12121a;
+    border: 1px solid #1e1e2e;
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+}
+
+.metric-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.metric-label {
+    font-size: 0.72rem;
+    color: #9e9e9e;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 4px;
+}
+
+.positive { color: #00e676; }
+.negative { color: #ff5252; }
+.neutral  { color: #90e0ef; }
+
+/* Cycle row colours */
+.cycle-profit    { background: rgba(0,230,118,0.06); }
+.cycle-loss      { background: rgba(255,82,82,0.06); }
+.cycle-abandoned { background: rgba(255,193,7,0.06); }
+
+/* Log panel */
+.log-panel {
+    background: #0d0d14;
+    border: 1px solid #1e1e2e;
+    border-radius: 8px;
+    padding: 10px 14px;
+    height: 220px;
+    overflow-y: auto;
+    font-family: 'Roboto Mono', monospace;
+    font-size: 0.74rem;
+    color: #b0b0c0;
+}
+
+.log-entry { margin-bottom: 3px; }
+
+/* Blazor error UI */
+#blazor-error-ui {
+    background: lightyellow;
+    bottom: 0;
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+#blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 0.75rem; top: 0.5rem; }

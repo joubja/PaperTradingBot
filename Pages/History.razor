@@ -1,0 +1,410 @@
+@page "/history"
+@inject DatabaseService Db
+@using Color = MudBlazor.Color
+@using Size  = MudBlazor.Size
+
+<PageTitle>Session History</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-4">
+
+    <MudText Typo="Typo.h5" Class="mb-4" Style="font-weight:700;letter-spacing:1px;">SESSION HISTORY</MudText>
+
+    <!-- ── Sessions table ──────────────────────────────────────────────── -->
+    <MudPaper Elevation="0" Class="pa-4 mb-4" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+        @if (_sessions.Count == 0)
+        {
+            <MudText Style="color:#555;">No sessions recorded yet.</MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Style="background:transparent;" Hover="true">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Strategy</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                        <th>Status</th>
+                        <th style="text-align:right;">Start ETH</th>
+                        <th style="text-align:right;">Final ETH</th>
+                        <th style="text-align:right;">ETH Gain</th>
+                        <th style="text-align:right;">ETH/hour</th>
+                        <th style="text-align:right;">Cycles</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in _sessions)
+                    {
+                        var isSelected  = _selected?.Id == s.Id;
+                        var startEth    = (decimal)s.StartingEth;
+                        var finalEth    = _finalEthBySession.TryGetValue(s.Id, out var fe) ? fe : 0m;
+                        var ethGain     = finalEth - startEth;
+                        var ethGainPct  = startEth > 0m ? ethGain / startEth * 100m : 0m;
+                        var gainCss     = ethGain >= 0 ? "positive" : "negative";
+                        var hours       = SessionHours(s);
+                        var ethPerHour  = hours > 0 ? ethGain / (decimal)hours : 0m;
+                        var stats       = _cycleStatsBySession.TryGetValue(s.Id, out var cs) ? cs : (0, 0);
+                        var winRateTxt  = stats.Item1 > 0 ? $"{stats.Item2}/{stats.Item1}" : "—";
+                        <tr style="cursor:pointer;@(isSelected ? "background:#1e1e2e;" : "")"
+                            @onclick="() => SelectSession(s)">
+                            <td>
+                                <MudIcon Icon="@(isSelected ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowRight)"
+                                         Size="Size.Small" Style="color:#666;" />
+                            </td>
+                            <td><strong>@s.Strategy</strong></td>
+                            <td>@FormatDate(s.StartedAt)</td>
+                            <td>@FormatDuration(s.StartedAt, s.StoppedAt)</td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small" Color="@StatusColor(s.Status)">@s.Status</MudChip>
+                            </td>
+                            <td style="text-align:right;">@startEth.ToString("F5")</td>
+                            <td style="text-align:right;" class="@(finalEth > 0 ? "positive" : "neutral")">
+                                @(finalEth > 0 ? finalEth.ToString("F5") : "—")
+                            </td>
+                            <td style="text-align:right;" class="@gainCss">
+                                @(startEth > 0 ? $"{(ethGain >= 0 ? "+" : "")}{ethGain:F5} ({(ethGainPct >= 0 ? "+" : "")}{ethGainPct:F2}%)" : "—")
+                            </td>
+                            <td style="text-align:right;" class="@(ethPerHour > 0 ? "positive" : "neutral")">
+                                @(hours > 0 && startEth > 0 ? $"{(ethPerHour >= 0 ? "+" : "")}{ethPerHour:F6}" : "—")
+                            </td>
+                            <td style="text-align:right;">@winRateTxt</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </MudPaper>
+
+    <!-- ── Detail panel ────────────────────────────────────────────────── -->
+    @if (_selected != null)
+    {
+        <MudText Typo="Typo.subtitle1" Class="mb-3" Style="font-weight:600;">
+            @_selected.Strategy &nbsp;·&nbsp; @FormatDate(_selected.StartedAt)
+        </MudText>
+
+        <!-- Charts row -->
+        <MudGrid Class="mb-4">
+            <MudItem xs="12">
+                <MudPaper Elevation="0" Class="pa-3" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+                    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">ETH ACCUMULATED</MudText>
+                    @if (_ethCurve.Count > 0)
+                    {
+                        <ApexChart TItem="EthQuantityPoint" Options="_ethChartOptions" Height="260" @key="@($"eth-{_selected?.Id}")">
+                            <ApexPointSeries TItem="EthQuantityPoint"
+                                             Items="_ethCurve"
+                                             Name="ETH"
+                                             SeriesType="SeriesType.Area"
+                                             XValue="@(e => e.Timestamp.ToLocalTime().ToString("HH:mm:ss"))"
+                                             YValue="@(e => (decimal)e.Quantity)" />
+                        </ApexChart>
+                    }
+                    else
+                    {
+                        <div Style="height:260px;display:flex;align-items:center;justify-content:center;color:#444;font-size:0.85rem;">
+                            No trades recorded for this session.
+                        </div>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <!-- Trades + Cycles row -->
+        <MudGrid>
+            <MudItem xs="12" md="@(_cycles.Count > 0 ? 8 : 12)">
+                <MudPaper Elevation="0" Class="pa-4" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+                    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">
+                        TRADES &nbsp;<MudChip T="string" Size="Size.Small">@_trades.Count</MudChip>
+                    </MudText>
+                    @if (_trades.Count == 0)
+                    {
+                        <MudText Style="color:#555;">No trades.</MudText>
+                    }
+                    else
+                    {
+                        <MudSimpleTable Dense="true" Style="background:transparent;">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th style="text-align:right;">Qty</th>
+                                    <th style="text-align:right;">Price</th>
+                                    <th style="text-align:right;">ETH held after</th>
+                                    <th>Note</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var (t, runningEth) in _tradesWithEth)
+                                {
+                                    <tr>
+                                        <td>@t.Timestamp.ToLocalTime().ToString("HH:mm:ss")</td>
+                                        <td><strong>@t.Symbol</strong></td>
+                                        <td>
+                                            <MudChip T="string" Size="Size.Small"
+                                                     Color="@(t.Side == TradeSide.Buy ? Color.Success : Color.Error)">
+                                                @t.Side
+                                            </MudChip>
+                                        </td>
+                                        <td style="text-align:right;">@t.Quantity.ToString("F5")</td>
+                                        <td style="text-align:right;">$@t.Price.ToString("F2")</td>
+                                        <td style="text-align:right;" class="@(runningEth > 0 ? "positive" : "neutral")">
+                                            @runningEth.ToString("F5")
+                                        </td>
+                                        <td Style="font-size:0.72rem;color:#666;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                                            title="@t.Note">
+                                            @(t.Note?.Length > 45 ? t.Note[..45] + "…" : t.Note)
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    }
+                </MudPaper>
+            </MudItem>
+
+            @if (_cycles.Count > 0)
+            {
+                <MudItem xs="12" md="4">
+                    <MudPaper Elevation="0" Class="pa-4" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+                        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">
+                            CYCLES &nbsp;<MudChip T="string" Size="Size.Small">@_cycles.Count</MudChip>
+                        </MudText>
+                        <MudSimpleTable Dense="true" Style="background:transparent;">
+                            <thead>
+                                <tr>
+                                    <th>Sell</th>
+                                    <th>Buy</th>
+                                    <th style="text-align:right;">Drop%</th>
+                                    <th style="text-align:right;">Duration</th>
+                                    <th style="text-align:right;">Net ETH</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var c in _cycles)
+                                {
+                                    var rowClass = c.IsAbandoned ? "cycle-abandoned" : c.IsProfit ? "cycle-profit" : "cycle-loss";
+                                    var drop     = !c.IsAbandoned && c.SellPrice > 0 ? (c.SellPrice - c.BuyPrice) / c.SellPrice * 100 : (decimal?)null;
+                                    var duration = !c.IsAbandoned ? FormatCycleDuration(c.SellTimestamp, c.BuyTimestamp) : "—";
+                                    <tr class="@rowClass">
+                                        <td>@c.SellTimestamp.ToLocalTime().ToString("HH:mm")</td>
+                                        <td>@(c.IsAbandoned ? "—" : c.BuyTimestamp.ToLocalTime().ToString("HH:mm"))</td>
+                                        <td style="text-align:right;" class="@(drop > 0 ? "positive" : drop < 0 ? "negative" : "")">
+                                            @(drop.HasValue ? $"{drop:F2}%" : "—")
+                                        </td>
+                                        <td style="text-align:right;color:#888;">@duration</td>
+                                        <td style="text-align:right;" class="@(c.IsAbandoned ? "" : c.IsProfit ? "positive" : "negative")">
+                                            @(c.IsAbandoned ? "abandoned" : $"{(c.IsProfit ? "+" : "")}{c.NetEthGain:F5}")
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+        <!-- AI Advisor history -->
+        @if (_advisorRuns.Count > 0)
+        {
+            <MudPaper Elevation="0" Class="pa-4 mt-4" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">
+                    AI ADVISOR HISTORY &nbsp;<MudChip T="string" Size="Size.Small">@_advisorRuns.Count</MudChip>
+                </MudText>
+                <MudSimpleTable Dense="true" Style="background:transparent;">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Trigger</th>
+                            <th>Reasoning</th>
+                            <th>Changes applied</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _advisorRuns)
+                        {
+                            <tr>
+                                <td style="white-space:nowrap;color:#888;font-size:0.75rem;">@r.Timestamp.ToLocalTime().ToString("MM-dd HH:mm")</td>
+                                <td style="white-space:nowrap;">
+                                    <MudChip T="string" Size="Size.Small"
+                                             Color="@(r.Trigger == "degradation" ? Color.Warning : r.Trigger == "regime-shift" ? Color.Error : Color.Default)">
+                                        @r.Trigger
+                                    </MudChip>
+                                </td>
+                                <td style="font-size:0.8rem;color:#ccc;max-width:480px;">@r.Reasoning</td>
+                                <td style="font-size:0.78rem;color:@(string.IsNullOrEmpty(r.Changes) ? "#555" : "#00e676");white-space:nowrap;">
+                                    @(string.IsNullOrEmpty(r.Changes) ? "no changes" : r.Changes)
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+        }
+
+        <!-- Bot phase log -->
+        @if (_botEvents.Count > 0)
+        {
+            <MudPaper Elevation="0" Class="pa-4 mt-4" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">
+                    BOT ACTIVITY LOG &nbsp;<MudChip T="string" Size="Size.Small">@_botEvents.Count</MudChip>
+                </MudText>
+                <MudSimpleTable Dense="true" Style="background:transparent;">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Phase</th>
+                            <th>Description</th>
+                            <th style="text-align:right;">Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in _botEvents)
+                        {
+                            <tr>
+                                <td style="white-space:nowrap;color:#888;font-size:0.75rem;">@e.Timestamp.ToLocalTime().ToString("MM-dd HH:mm:ss")</td>
+                                <td style="white-space:nowrap;">
+                                    <MudChip T="string" Size="Size.Small"
+                                             Color="@PhaseColor(e.Phase)">
+                                        @e.Phase
+                                    </MudChip>
+                                </td>
+                                <td style="font-size:0.8rem;color:#ccc;">@e.Description</td>
+                                <td style="text-align:right;color:#888;font-size:0.78rem;white-space:nowrap;">@e.FormatDuration()</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+        }
+    }
+
+</MudContainer>
+
+@code {
+    private List<SessionSummary>              _sessions            = new();
+    private Dictionary<string, decimal>       _finalEthBySession   = new();
+    private Dictionary<string, (int Total, int Wins)> _cycleStatsBySession = new();
+    private SessionSummary?                   _selected;
+    private List<EthQuantityPoint>            _ethCurve            = new();
+    private List<Trade>                       _trades              = new();
+    private List<(Trade Trade, decimal Eth)>  _tradesWithEth       = new();
+    private List<CycleResult>                 _cycles              = new();
+    private List<AdvisorRun>                  _advisorRuns         = new();
+    private List<BotEvent>                    _botEvents           = new();
+
+    // ── Chart options ─────────────────────────────────────────────────────────
+
+    private readonly ApexChartOptions<EthQuantityPoint> _ethChartOptions = new()
+    {
+        Chart   = new Chart  { Background = "transparent", Toolbar = new Toolbar { Show = false }, Animations = new Animations { Enabled = false } },
+        Stroke  = new Stroke { Curve = Curve.Smooth, Width = new List<double> { 2 } },
+        Fill    = new Fill   { Type = new List<FillType> { FillType.Gradient },
+                               Gradient = new FillGradient { ShadeIntensity = 1, OpacityFrom = 0.40, OpacityTo = 0.05, Stops = new List<double> { 0, 100 } } },
+        Colors  = new List<string> { "#00e676" },
+        Grid    = new Grid   { BorderColor = "#1e1e2e" },
+        Xaxis   = new XAxis  { Labels = new XAxisLabels { Show = false } },
+        Yaxis   = new List<YAxis>
+        {
+            new() { DecimalsInFloat = 5, Labels = new YAxisLabels { Formatter = "function(v){ return v.toFixed(5)+' ETH'; }" } }
+        },
+        Tooltip = new Tooltip { Theme = Mode.Dark, Style = new TooltipStyle { FontSize = "13px" } }
+    };
+
+// ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    protected override void OnInitialized()
+    {
+        _sessions = Db.GetRecentSessions(50);
+        foreach (var s in _sessions)
+        {
+            var delta = Db.GetSessionFinalEth(s.Id);
+            _finalEthBySession[s.Id]   = (decimal)s.StartingEth + delta;
+            _cycleStatsBySession[s.Id] = Db.GetSessionCycleStats(s.Id);
+        }
+
+        if (_sessions.Count > 0) SelectSession(_sessions[0]);
+    }
+
+    private void SelectSession(SessionSummary s)
+    {
+        _selected    = s;
+        _trades      = Db.GetSessionTrades(s.Id);
+        _cycles      = Db.GetRecentCompleteCycles(s.Id, limit: 100);
+        _advisorRuns = Db.GetSessionAdvisorRuns(s.Id);
+        _botEvents   = Db.GetSessionBotEvents(s.Id);
+
+        _tradesWithEth = BuildTradesWithRunningEth(_trades);
+        _ethCurve      = BuildEthCurve(_trades);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static List<(Trade, decimal)> BuildTradesWithRunningEth(List<Trade> trades)
+    {
+        var result = new List<(Trade, decimal)>(trades.Count);
+        decimal running = 0m;
+        foreach (var t in trades)
+        {
+            running += t.Side == TradeSide.Buy ? t.Quantity : -t.Quantity;
+            result.Add((t, running));
+        }
+        return result;
+    }
+
+    private static List<EthQuantityPoint> BuildEthCurve(List<Trade> trades)
+    {
+        var points = new List<EthQuantityPoint>(trades.Count);
+        decimal running = 0m;
+        foreach (var t in trades)
+        {
+            if (t.Note == "Shutdown close-out") continue;
+            running += t.Side == TradeSide.Buy ? t.Quantity : -t.Quantity;
+            points.Add(new EthQuantityPoint { Timestamp = t.Timestamp, Quantity = running });
+        }
+        return points;
+    }
+
+    private static double SessionHours(SessionSummary s)
+    {
+        if (!DateTime.TryParse(s.StartedAt, out var start)) return 0;
+        var end = s.StoppedAt != null && DateTime.TryParse(s.StoppedAt, out var stopped) ? stopped : DateTime.UtcNow;
+        return (end - start).TotalHours;
+    }
+
+    private static string FormatDate(string iso) =>
+        DateTime.TryParse(iso, out var dt) ? dt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : iso;
+
+    private static string FormatDuration(string startIso, string? stopIso)
+    {
+        if (!DateTime.TryParse(startIso, out var start)) return "—";
+        var end = stopIso != null && DateTime.TryParse(stopIso, out var s) ? s : DateTime.UtcNow;
+        var d   = end - start;
+        return d.TotalHours >= 1 ? $"{(int)d.TotalHours}h {d.Minutes}m" : $"{d.Minutes}m {d.Seconds}s";
+    }
+
+    private static string FormatCycleDuration(DateTime sell, DateTime buy)
+    {
+        var d = buy - sell;
+        if (d.TotalHours >= 1) return $"{(int)d.TotalHours}h {d.Minutes}m";
+        if (d.TotalMinutes >= 1) return $"{(int)d.TotalMinutes}m";
+        return $"{(int)d.TotalSeconds}s";
+    }
+
+    private static Color PhaseColor(string phase) => phase switch
+    {
+        "ActiveSell"       => Color.Warning,
+        "Cooldown"         => Color.Secondary,
+        "TrendFilter"      => Color.Success,
+        "CyclingSuspended" => Color.Error,
+        "WarmingUp"        => Color.Default,
+        _                  => Color.Default
+    };
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "Running" => Color.Success,
+        "Stopped" => Color.Default,
+        "Crashed" => Color.Error,
+        _         => Color.Default
+    };
+}

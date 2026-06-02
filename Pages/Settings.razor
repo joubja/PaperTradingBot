@@ -1,0 +1,529 @@
+@page "/settings"
+@inject LiveSettingsService       S
+@inject BotStateService           BotState
+@inject OptimizerStateService     OptimizerState
+@inject StrategyBanditOptimizer   Bandit
+@inject ISnackbar                 Snackbar
+@implements IDisposable
+@using PaperTradingBot.AI
+@using Color = MudBlazor.Color
+@using Size  = MudBlazor.Size
+
+<PageTitle>Settings — PaperTradingBot</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
+
+    <!-- ── Header ──────────────────────────────────────────────────────────── -->
+    <MudPaper Elevation="0" Class="pa-4 mb-4 d-flex align-center justify-space-between"
+              Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+        <div>
+            <MudText Typo="Typo.h6" Style="font-weight:700;">Live Settings</MudText>
+            <MudText Typo="Typo.caption" Style="color:#666;">
+                @if (BotState.IsRunning)
+                { <span style="color:#00e676;">&#9679; Live</span><span> — changes apply on the next bar</span> }
+                else
+                { <span style="color:#9e9e9e;">&#9679; Stopped</span><span> — changes apply when the bot starts</span> }
+            </MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                   OnClick="ResetAll" StartIcon="@Icons.Material.Filled.RestartAlt">
+            Reset to defaults
+        </MudButton>
+    </MudPaper>
+
+    <!-- ── AI Optimizer status ─────────────────────────────────────────────── -->
+    <MudPaper Elevation="0" Class="pa-4 mb-4" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-3">
+            <MudText Typo="Typo.subtitle2" Style="color:#9e9e9e;letter-spacing:0.08em;">AI OPTIMIZER</MudText>
+            <div class="d-flex align-center gap-2 flex-wrap">
+                <MudChip T="string" Size="Size.Small"
+                         Style="@($"color:{RewardColor};border-color:{RewardColor};")"
+                         Variant="Variant.Outlined"
+                         Icon="@Icons.Material.Filled.ShowChart">
+                    Rolling @(RollingReward >= 0 ? "+" : "")@RollingReward.ToString("F3")
+                </MudChip>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(OptimizerState.IsPaused ? Color.Warning : Color.Success)"
+                         Icon="@(OptimizerState.IsPaused ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)">
+                    @(OptimizerState.IsPaused ? "Paused" : "Active")
+                </MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Default"
+                         Icon="@Icons.Material.Filled.Schedule">
+                    Claude @LastClaudeText
+                </MudChip>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                           Color="@(OptimizerState.IsPaused ? Color.Success : Color.Warning)"
+                           OnClick="TogglePause">
+                    @(OptimizerState.IsPaused ? "Resume" : "Pause")
+                </MudButton>
+            </div>
+        </div>
+
+        @if (OptimizerState.InsufficientCredits)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
+                Insufficient API credits — top up at console.anthropic.com, then
+                <MudButton Size="Size.Small" OnClick="@(() => OptimizerState.ClearCreditFailure())">Retry</MudButton>
+            </MudAlert>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(OptimizerState.LastClaudeReasoning))
+        {
+            <div style="background:#0d1117;border:1px solid #1e1e2e;border-radius:8px;padding:10px 14px;">
+                <div style="font-size:0.7rem;color:#555;letter-spacing:0.08em;margin-bottom:4px;">LAST CLAUDE REASONING</div>
+                <div style="font-size:0.85rem;color:#ccc;line-height:1.5;">@OptimizerState.LastClaudeReasoning</div>
+            </div>
+        }
+    </MudPaper>
+
+    <!-- ── Bandit arm explorer ─────────────────────────────────────────────── -->
+    @if (_banditStatus.Count > 0)
+    {
+        <MudExpansionPanel Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;margin-bottom:8px;"
+                           Expanded="true">
+            <TitleContent>
+                <div>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Bandit Arm Explorer</MudText>
+                    <MudText Typo="Typo.caption" Style="color:#666;">UCB1 — each setting explores 5 discrete arms. Active arm ★ is currently applied.</MudText>
+                </div>
+            </TitleContent>
+            <ChildContent>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:separate;border-spacing:0 4px;font-size:0.82rem;">
+                        <thead>
+                            <tr style="color:#555;font-size:0.72rem;letter-spacing:0.06em;">
+                                <th style="text-align:left;padding:4px 8px;">SETTING</th>
+                                <th style="text-align:center;padding:4px 8px;">CURRENT</th>
+                                <th style="text-align:center;padding:4px 8px;">PULLS</th>
+                                @for (var a = 0; a < 5; a++)
+                                {
+                                    <th style="text-align:center;padding:4px 8px;">ARM @(a+1)</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var b in _banditStatus)
+                            {
+                                <tr>
+                                    <td style="padding:4px 8px;color:#ccc;white-space:nowrap;">@FormatBanditName(b.Name)</td>
+                                    <td style="padding:4px 8px;text-align:center;color:#00b4d8;font-weight:700;">@FormatArmValue(b.Name, b.CurrentValue)</td>
+                                    <td style="padding:4px 8px;text-align:center;color:#666;">@b.TotalPulls</td>
+                                    @for (var i = 0; i < b.Arms.Length; i++)
+                                    {
+                                        var (val, pulls, mean) = b.Arms[i];
+                                        var isActive = i == b.ActiveArmIndex;
+                                        <td style="@ArmCellStyle(isActive, pulls, mean)">
+                                            <div style="font-weight:@(isActive ? "700" : "400");color:@(isActive ? "#00b4d8" : "#ccc");">
+                                                @FormatArmValue(b.Name, val)@(isActive ? " ★" : "")
+                                            </div>
+                                            @if (pulls > 0)
+                                            {
+                                                <div style="font-size:0.7rem;color:@ArmRewardColor(mean);">
+                                                    @(mean >= 0 ? "+" : "")@mean.ToString("F3") / @pulls
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <div style="font-size:0.7rem;color:#444;">–</div>
+                                            }
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </ChildContent>
+        </MudExpansionPanel>
+    }
+
+    <MudExpansionPanels MultiExpansion="true" Elevation="0">
+
+        <!-- ── BuildEthCycling: RSI Thresholds ─────────────────────────────── -->
+        <MudExpansionPanel Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;margin-bottom:8px;"
+                           Expanded="true">
+            <TitleContent>
+                <div>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">BuildEthCycling — RSI Thresholds</MudText>
+                    <MudText Typo="Typo.caption" Style="color:#666;">Controls when the strategy buys, sells, and cycles</MudText>
+                </div>
+            </TitleContent>
+            <ChildContent>
+            <MudGrid Class="pa-2 pt-0" Spacing="4">
+
+                <MudItem xs="12" sm="6">
+                    @AiBadge("RsiDipBuy")
+                    <div class="d-flex justify-space-between align-center mb-1">
+                        <MudText Typo="Typo.body2">RSI Dip Buy</MudText>
+                        <MudText Typo="Typo.body1" Style="font-weight:700;color:#00b4d8;">@S.RsiDipBuy.ToString("F0")</MudText>
+                    </div>
+                    <MudSlider T="decimal" Value="S.RsiDipBuy" Min="10" Max="65" Step="1" Color="Color.Primary"
+                               ValueChanged="@(v => { S.RsiDipBuy = v; Toast($"RSI Dip Buy → {v:F0}"); })" />
+                    <MudText Typo="Typo.caption" Style="color:#555;">Accumulate ETH when 1-min RSI drops below this</MudText>
+                    @LastChangeChip("RsiDipBuy")
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    @AiBadge("RsiCrossoverMax")
+                    <div class="d-flex justify-space-between align-center mb-1">
+                        <MudText Typo="Typo.body2">RSI EMA-Cross Max</MudText>
+                        <MudText Typo="Typo.body1" Style="font-weight:700;color:#00b4d8;">@S.RsiCrossoverMax.ToString("F0")</MudText>
+                    </div>
+                    <MudSlider T="decimal" Value="S.RsiCrossoverMax" Min="40" Max="80" Step="1" Color="Color.Primary"
+                               ValueChanged="@(v => { S.RsiCrossoverMax = v; Toast($"RSI EMA-Cross Max → {v:F0}"); })" />
+                    <MudText Typo="Typo.caption" Style="color:#555;">Allow bull-cross buys only when RSI is below this</MudText>
+                    @LastChangeChip("RsiCrossMax")
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    @AiBadge("RsiCycleSell")
+                    <div class="d-flex justify-space-between align-center mb-1">
+                        <MudText Typo="Typo.body2">RSI Cycle Sell</MudText>
+                        <MudText Typo="Typo.body1" Style="font-weight:700;color:#00b4d8;">@S.RsiCycleSell.ToString("F0")</MudText>
+                    </div>
+                    <MudSlider T="decimal" Value="S.RsiCycleSell" Min="55" Max="90" Step="1" Color="Color.Primary"
+                               ValueChanged="@(v => { S.RsiCycleSell = v; Toast($"RSI Cycle Sell → {v:F0}"); })" />
+                    <MudText Typo="Typo.caption" Style="color:#555;">Trigger a partial cycle sell when 1-min RSI exceeds this (and is declining)</MudText>
+                    @LastChangeChip("RsiCycleSell")
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    @AiBadge("RsiCycleRebuy")
+                    <div class="d-flex justify-space-between align-center mb-1">
+                        <MudText Typo="Typo.body2">RSI Cycle Rebuy</MudText>
+                        <MudText Typo="Typo.body1" Style="font-weight:700;color:#00b4d8;">@S.RsiCycleRebuy.ToString("F0")</MudText>
+                    </div>
+                    <MudSlider T="decimal" Value="S.RsiCycleRebuy" Min="20" Max="65" Step="1" Color="Color.Primary"
+                               ValueChanged="@(v => { S.RsiCycleRebuy = v; Toast($"RSI Cycle Rebuy → {v:F0}"); })" />
+                    <MudText Typo="Typo.caption" Style="color:#555;">Safety-valve rebuy when RSI falls back below this during an active sell</MudText>
+                    @LastChangeChip("RsiCycleRebuy")
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <div class="d-flex justify-space-between align-center mb-1">
+                        <MudText Typo="Typo.body2">RSI Re-enable Cycling</MudText>
+                        <MudText Typo="Typo.body1" Style="font-weight:700;color:#00b4d8;">@S.CyclingReenableRsi.ToString("F0")</MudText>
+                    </div>
+                    <MudSlider T="decimal" Value="S.CyclingReenableRsi" Min="10" Max="45" Step="1" Color="Color.Primary"
+                               ValueChanged="@(v => { S.CyclingReenableRsi = v; Toast($"RSI Re-enable → {v:F0}"); })" />
+                    <MudText Typo="Typo.caption" Style="color:#555;">Re-enable suspended cycling when RSI dips below this</MudText>
+                </MudItem>
+
+            </MudGrid>
+            </ChildContent>
+        </MudExpansionPanel>
+
+        <!-- ── BuildEthCycling: Cycle Mechanics ────────────────────────────── -->
+        <MudExpansionPanel Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;margin-bottom:8px;"
+                           Expanded="true">
+            <TitleContent>
+                <div>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">BuildEthCycling — Cycle Mechanics</MudText>
+                    <MudText Typo="Typo.caption" Style="color:#666;">Adaptive sell fraction, abandon threshold, bounce confirmation</MudText>
+                </div>
+            </TitleContent>
+            <ChildContent>
+            <MudGrid Class="pa-2 pt-0" Spacing="4">
+
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="decimal" Label="Min Sell %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="@(S.MinSellPct * 100m)" Min="1" Max="50" Step="5" Format="F0"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Floor for adaptive cycle sell fraction (flat markets)"
+                                     ValueChanged="@(v => { S.MinSellPct = v / 100m; Toast($"Min Sell → {v:F0}%"); })" />
+                </MudItem>
+
+                <MudItem xs="12" sm="4">
+                    @AiBadge("DefaultSellPct")
+                    <MudNumericField T="decimal" Label="Default Sell %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="@(S.DefaultSellPct * 100m)" Min="10" Max="70" Step="5" Format="F0"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Sell fraction in balanced-volatility markets"
+                                     ValueChanged="@(v => { S.DefaultSellPct = v / 100m; Toast($"Default Sell → {v:F0}%"); })" />
+                    @LastChangeChip("SellPct")
+                </MudItem>
+
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="decimal" Label="Max Sell %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="@(S.MaxSellPct * 100m)" Min="30" Max="90" Step="5" Format="F0"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Ceiling for adaptive cycle sell fraction (volatile markets)"
+                                     ValueChanged="@(v => { S.MaxSellPct = v / 100m; Toast($"Max Sell → {v:F0}%"); })" />
+                </MudItem>
+
+                <MudItem xs="12" sm="4">
+                    @AiBadge("MinAbandonRise")
+                    <MudNumericField T="decimal" Label="Min Abandon Rise %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="@(S.MinAbandonRise * 100m)" Min="0.1m" Max="5m" Step="0.1m" Format="F1"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Minimum price rise before abandoning a cycle"
+                                     ValueChanged="@(v => { S.MinAbandonRise = v / 100m; Toast($"Min Abandon → {v:F1}%"); })" />
+                    @LastChangeChip("MinAbandon")
+                </MudItem>
+
+                <MudItem xs="12" sm="4">
+                    @AiBadge("MaxAbandonRise")
+                    <MudNumericField T="decimal" Label="Max Abandon Rise %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="@(S.MaxAbandonRise * 100m)" Min="1m" Max="15m" Step="0.5m" Format="F1"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Maximum price rise before abandoning a cycle (volatile markets)"
+                                     ValueChanged="@(v => { S.MaxAbandonRise = v / 100m; Toast($"Max Abandon → {v:F1}%"); })" />
+                    @LastChangeChip("MaxAbandon")
+                </MudItem>
+
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="decimal" Label="Min Bounce From Low %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="@(S.MinBounceFromLow * 100m)" Min="0.05m" Max="2m" Step="0.05m" Format="F2"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Price must bounce at least this % off the cycle low before rebuying"
+                                     ValueChanged="@(v => { S.MinBounceFromLow = v / 100m; Toast($"Min Bounce → {v:F2}%"); })" />
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="decimal" Label="Trend Spread Block %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="S.TrendSpreadBlock" Min="0m" Max="1m" Step="0.01m" Format="F2"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Block cycle sells when EMA9 is more than this % above EMA21"
+                                     ValueChanged="@(v => { S.TrendSpreadBlock = v; Toast($"Trend Spread → {v:F2}%"); })" />
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    @AiBadge("CooldownBars")
+                    <MudNumericField T="int" Label="Cycle Cooldown Bars" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="S.CycleCooldownBars" Min="0" Max="60" Step="1"
+                                     HelperText="Bars to wait after each cycle event before allowing another sell"
+                                     ValueChanged="@(v => { S.CycleCooldownBars = v; Toast($"Cooldown → {v} bars"); })" />
+                    @LastChangeChip("Cooldown")
+                </MudItem>
+
+            </MudGrid>
+            </ChildContent>
+        </MudExpansionPanel>
+
+        <!-- ── Technical Strategy ──────────────────────────────────────────── -->
+        <MudExpansionPanel Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;margin-bottom:8px;">
+            <TitleContent>
+                <div>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Technical Strategy (EMA/RSI/MACD)</MudText>
+                    <MudText Typo="Typo.caption" Style="color:#666;">RSI filter for EMA crossover signals</MudText>
+                </div>
+            </TitleContent>
+            <ChildContent>
+            <MudGrid Class="pa-2 pt-0" Spacing="4">
+
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="int" Label="RSI Period" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="S.RsiPeriod" Min="2" Max="50" Step="1"
+                                     HelperText="Number of bars used to compute RSI"
+                                     ValueChanged="@(v => { S.RsiPeriod = v; Toast($"RSI Period → {v}"); })" />
+                </MudItem>
+
+                <MudItem xs="12" sm="4">
+                    <div class="d-flex justify-space-between align-center mb-1">
+                        <MudText Typo="Typo.body2">RSI Buy Max</MudText>
+                        <MudText Typo="Typo.body1" Style="font-weight:700;color:#00b4d8;">@S.RsiBuyMax.ToString("F0")</MudText>
+                    </div>
+                    <MudSlider T="decimal" Value="S.RsiBuyMax" Min="50" Max="90" Step="1" Color="Color.Primary"
+                               ValueChanged="@(v => { S.RsiBuyMax = v; Toast($"RSI Buy Max → {v:F0}"); })" />
+                    <MudText Typo="Typo.caption" Style="color:#555;">Block a bull-cross buy if RSI is already above this</MudText>
+                </MudItem>
+
+                <MudItem xs="12" sm="4">
+                    <div class="d-flex justify-space-between align-center mb-1">
+                        <MudText Typo="Typo.body2">RSI Sell Min</MudText>
+                        <MudText Typo="Typo.body1" Style="font-weight:700;color:#00b4d8;">@S.RsiSellMin.ToString("F0")</MudText>
+                    </div>
+                    <MudSlider T="decimal" Value="S.RsiSellMin" Min="10" Max="50" Step="1" Color="Color.Primary"
+                               ValueChanged="@(v => { S.RsiSellMin = v; Toast($"RSI Sell Min → {v:F0}"); })" />
+                    <MudText Typo="Typo.caption" Style="color:#555;">Block a bear-cross sell if RSI is already below this</MudText>
+                </MudItem>
+
+            </MudGrid>
+            </ChildContent>
+        </MudExpansionPanel>
+
+        <!-- ── Risk Controls ───────────────────────────────────────────────── -->
+        <MudExpansionPanel Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;margin-bottom:8px;">
+            <TitleContent>
+                <div>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Risk Controls</MudText>
+                    <MudText Typo="Typo.caption" Style="color:#666;">Daily loss limits, trade frequency, position caps (0 = disabled)</MudText>
+                </div>
+            </TitleContent>
+            <ChildContent>
+            <MudGrid Class="pa-2 pt-0" Spacing="4">
+
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="decimal" Label="Max Daily Loss %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="S.MaxDailyLossPercent" Min="0m" Max="20m" Step="0.5m" Format="F1"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Halt trading if equity drops by this % today (0 = off)"
+                                     ValueChanged="@(v => { S.MaxDailyLossPercent = v; Toast($"Max Daily Loss → {v:F1}%"); })" />
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="int" Label="Max Trades Per Day" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="S.MaxTradesPerDay" Min="0" Max="100" Step="1"
+                                     HelperText="Hard cap on executions per calendar day (0 = off)"
+                                     ValueChanged="@(v => { S.MaxTradesPerDay = v; Toast($"Max Trades/Day → {v}"); })" />
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="int" Label="Cooldown Bars After Trade" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="S.CooldownBarsAfterTrade" Min="0" Max="60" Step="1"
+                                     HelperText="Bars to wait between any two executed trades"
+                                     ValueChanged="@(v => { S.CooldownBarsAfterTrade = v; Toast($"Trade Cooldown → {v} bars"); })" />
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="decimal" Label="Max Position Value %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="@(S.MaxPositionValuePct * 100m)" Min="10m" Max="100m" Step="5m" Format="F0"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Block buys once position reaches this % of total equity"
+                                     ValueChanged="@(v => { S.MaxPositionValuePct = v / 100m; Toast($"Max Position → {v:F0}%"); })" />
+                </MudItem>
+
+            </MudGrid>
+            </ChildContent>
+        </MudExpansionPanel>
+
+        <!-- ── Position Sizing ─────────────────────────────────────────────── -->
+        <MudExpansionPanel Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;margin-bottom:8px;">
+            <TitleContent>
+                <div>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Position Sizing (Allocation mode)</MudText>
+                    <MudText Typo="Typo.caption" Style="color:#666;">Target spend per non-cycling buy signal</MudText>
+                </div>
+            </TitleContent>
+            <ChildContent>
+            <MudGrid Class="pa-2 pt-0" Spacing="4">
+
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="decimal" Label="Target Position Value %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="@(S.TargetPositionValuePercent * 100m)" Min="1m" Max="100m" Step="1m" Format="F0"
+                                     Adornment="Adornment.End" AdornmentText="%"
+                                     HelperText="Buy up to this % of total equity per accumulation signal"
+                                     ValueChanged="@(v => { S.TargetPositionValuePercent = v / 100m; Toast($"Target Size → {v:F0}%"); })" />
+                </MudItem>
+
+            </MudGrid>
+            </ChildContent>
+        </MudExpansionPanel>
+
+    </MudExpansionPanels>
+</MudContainer>
+
+@code {
+    private IReadOnlyList<BanditArmStatus> _banditStatus = [];
+
+    protected override void OnInitialized()
+    {
+        OptimizerState.OnChanged += HandleChanged;
+        _banditStatus = Bandit.GetArmStatus();
+    }
+
+    public void Dispose() => OptimizerState.OnChanged -= HandleChanged;
+
+    private async void HandleChanged()
+    {
+        _banditStatus = Bandit.GetArmStatus();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ── Optimizer helpers ─────────────────────────────────────────────────────
+
+    private float RollingReward => OptimizerState.GetHistory().FirstOrDefault()?.RollingReward ?? 0f;
+    private string RewardColor  => RollingReward > 0.05f ? "#00e676" : RollingReward < -0.05f ? "#f44336" : "#9e9e9e";
+
+    private string LastClaudeText => OptimizerState.LastClaudeCallAt == DateTime.MinValue
+        ? "never called"
+        : FormatAgo(DateTime.UtcNow - OptimizerState.LastClaudeCallAt);
+
+    private void TogglePause() => OptimizerState.SetPaused(!OptimizerState.IsPaused);
+
+    // ── Bandit helpers ────────────────────────────────────────────────────────
+
+    private static string FormatBanditName(string name) => name switch
+    {
+        "RsiDipBuy"       => "RSI Dip Buy",
+        "RsiCrossoverMax" => "RSI Cross Max",
+        "RsiCycleSell"    => "RSI Cycle Sell",
+        "RsiCycleRebuy"   => "RSI Cycle Rebuy",
+        "DefaultSellPct"  => "Default Sell %",
+        "MinAbandonRise"  => "Min Abandon %",
+        "MaxAbandonRise"  => "Max Abandon %",
+        "CooldownBars"    => "Cooldown Bars",
+        _                 => name
+    };
+
+    private static string FormatArmValue(string name, decimal val) => name switch
+    {
+        "DefaultSellPct" or "MinAbandonRise" or "MaxAbandonRise" => val.ToString("P1"),
+        _                                                          => val.ToString("F0")
+    };
+
+    private static string ArmCellStyle(bool isActive, int pulls, float mean)
+    {
+        var bg = isActive ? "#0d2240"
+               : pulls == 0 ? "transparent"
+               : mean > 0.05f ? "#0d2b1a"
+               : mean < -0.05f ? "#2b0d0d"
+               : "transparent";
+        var border = isActive ? "border:1px solid #00b4d8" : "border:1px solid #1e1e2e";
+        return $"background:{bg};{border};padding:5px 8px;border-radius:6px;text-align:center;min-width:64px;";
+    }
+
+    private static string ArmRewardColor(float mean)
+        => mean > 0.05f ? "#00e676" : mean < -0.05f ? "#f44336" : "#666";
+
+    // ── AI badge + last change ────────────────────────────────────────────────
+
+    private RenderFragment AiBadge(string banditName) => __builder =>
+    {
+        var b = _banditStatus.FirstOrDefault(x => x.Name == banditName);
+        if (b == null) return;
+        __builder.OpenComponent<MudChip<string>>(0);
+        __builder.AddAttribute(1, "T", typeof(string));
+        __builder.AddAttribute(2, "Size", Size.Small);
+        __builder.AddAttribute(3, "Color", Color.Info);
+        __builder.AddAttribute(4, "Icon", Icons.Material.Filled.SmartToy);
+        __builder.AddAttribute(5, "Style", "margin-bottom:4px;");
+        __builder.AddAttribute(6, "ChildContent", (RenderFragment)(cb =>
+        {
+            cb.AddContent(0, $"AI · arm {b.ActiveArmIndex + 1}/5 · {b.TotalPulls} pulls");
+        }));
+        __builder.CloseComponent();
+    };
+
+    private RenderFragment LastChangeChip(string keyword) => __builder =>
+    {
+        var record = OptimizerState.GetHistory()
+            .FirstOrDefault(r => r.Changes.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+        if (record == null) return;
+        var ago = FormatAgo(DateTime.UtcNow - record.Timestamp);
+        var text = $"{record.Source} · {ago}";
+        __builder.OpenElement(0, "div");
+        __builder.AddAttribute(1, "style", "font-size:0.72rem;color:#555;margin-top:2px;");
+        __builder.AddContent(2, $"Last changed: {text}");
+        __builder.CloseElement();
+    };
+
+    private static string FormatAgo(TimeSpan span)
+    {
+        if (span.TotalHours  >= 1)  return $"{(int)span.TotalHours}h {span.Minutes}m ago";
+        if (span.TotalMinutes >= 1) return $"{(int)span.TotalMinutes}m ago";
+        return $"{(int)span.TotalSeconds}s ago";
+    }
+
+    // ── Actions ───────────────────────────────────────────────────────────────
+
+    private void Toast(string msg) =>
+        Snackbar.Add(msg, Severity.Info, c => { c.VisibleStateDuration = 1500; c.HideTransitionDuration = 300; });
+
+    private void ResetAll()
+    {
+        S.ResetToDefaults();
+        Snackbar.Add("All settings reset to defaults", Severity.Warning);
+        StateHasChanged();
+    }
+}

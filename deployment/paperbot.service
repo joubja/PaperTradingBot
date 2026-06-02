@@ -1,0 +1,32 @@
+[Unit]
+Description=PaperTradingBot - Ethereum paper trading bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=paperbot
+Group=paperbot
+WorkingDirectory=/opt/paperbot
+ExecStart=/usr/bin/dotnet /opt/paperbot/PaperTradingBot.dll
+Restart=always
+RestartSec=10
+# Up to 5 restarts in 2 minutes before systemd stops trying
+StartLimitIntervalSec=120
+StartLimitBurst=5
+# 30s to start, 30s to shut down gracefully before SIGKILL
+TimeoutStartSec=30
+TimeoutStopSec=30
+# Pipe stdout/stderr to journald (use: journalctl -u paperbot -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=paperbot
+# Environment
+Environment=ASPNETCORE_ENVIRONMENT=Production
+# Bind to localhost only — access the dashboard via SSH tunnel:
+#   ssh -i key.pem -L 5000:localhost:5000 ubuntu@<ec2-host>
+Environment=ASPNETCORE_URLS=http://localhost:5000
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+
+[Install]
+WantedBy=multi-user.target
