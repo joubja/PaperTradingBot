@@ -342,27 +342,70 @@ public class LiveDemoRuntime : ITradingRuntime
                 return;
             }
 
-            var applied = ApplyFillAndRecordTrade(symbol, decision.Intent, fill);
-            if (applied && !string.IsNullOrEmpty(_sessionId))
+            // [C-3] Write trade to DB FIRST, before applying to the in-memory portfolio.
+            // If the process crashes after the DB write but before memory apply, the trade
+            // is replayed correctly on resume. The old order (memory → DB) lost trades
+            // permanently when a crash occurred in that window.
+            if (!string.IsNullOrEmpty(_sessionId))
             {
-                var lastTrade = _sessionResultRecorder.GetLastTrade();
-                if (lastTrade is not null)
+                var tradeSide   = decision.Intent.IntentType == OrderIntentType.Buy ? TradeSide.Buy : TradeSide.Sell;
+                // For sells, estimate PnL from current avgEntry (same formula as TryApplySellFill).
+                // For buys, realizedPnL is always 0.
+                var estimatedPnL = 0m;
+                if (tradeSide == TradeSide.Sell)
                 {
-                    _db.InsertTrade(_sessionId, lastTrade);
-                    _botState.NotifyTrade(lastTrade);
+                    var avgEntry   = _portfolioStateStore.GetAverageEntryPrice(symbol);
+                    var netProc    = fill.FillPrice * fill.FilledQuantity - fill.Commission;
+                    estimatedPnL   = netProc - (avgEntry * fill.FilledQuantity);
+                }
+
+                var dbTrade = new Trade
+                {
+                    Timestamp   = fill.TimestampUtc,
+                    Symbol      = symbol,
+                    Side        = tradeSide,
+                    Quantity    = fill.FilledQuantity,
+                    Price       = fill.FillPrice,
+                    Commission  = fill.Commission,
+                    RealizedPnL = estimatedPnL,
+                    Note        = fill.Reason
+                };
+
+                try
+                {
+                    _db.InsertTrade(_sessionId, dbTrade);
+                }
+                catch (Exception dbEx)
+                {
+                    // If the DB write fails, do NOT apply to memory — the portfolio and DB
+                    // must stay in sync. The operator must investigate and recover manually.
+                    _logger.LogCritical(dbEx,
+                        "DB_TRADE_WRITE_FAILED | MANUAL RECOVERY REQUIRED | " +
+                        "Symbol={Symbol} Side={Side} Qty={Qty:F5} Price={Price:F4} Ts={Ts:u}",
+                        fill.Symbol, fill.Side, fill.FilledQuantity, fill.FillPrice, fill.TimestampUtc);
+                    RecordEquityPoint(candle.Timestamp);
+                    return;
                 }
             }
+
+            var applied = ApplyFillAndRecordTrade(symbol, decision.Intent, fill);
             if (!applied)
             {
-                _logger.LogWarning(
-                    "LOCAL PAPER APPLY FAILED | Symbol={Symbol} Side={Side} Qty={Qty:F4}",
-                    fill.Symbol,
-                    fill.Side,
-                    fill.FilledQuantity);
-
+                // DB record was written but portfolio rejected the apply — CRITICAL inconsistency.
+                // The trade will be replayed on next resume so the portfolio will self-correct,
+                // but alert immediately for manual review.
+                _logger.LogCritical(
+                    "PORTFOLIO_APPLY_FAILED | DB trade written but portfolio rejected — inconsistency! " +
+                    "Symbol={Symbol} Side={Side} Qty={Qty:F4}. Will self-correct on next resume.",
+                    fill.Symbol, fill.Side, fill.FilledQuantity);
                 RecordEquityPoint(candle.Timestamp);
                 return;
             }
+
+            // Notify state with actual trade (which has the real RealizedPnL from TryApplySellFill).
+            var lastTrade = _sessionResultRecorder.GetLastTrade();
+            if (lastTrade is not null)
+                _botState.NotifyTrade(lastTrade);
 
             _riskManager.RegisterExecutedTrade(
                 DateOnly.FromDateTime(candle.Timestamp),

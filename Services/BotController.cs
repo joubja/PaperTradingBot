@@ -198,10 +198,27 @@ public class BotController
             startingEth = snapshot.EthFree;
             _logger.LogInformation("WALLET | Starting fresh with real balance: {Eth:F5} ETH", startingEth);
         }
+        else if (!_options.Runtime.LocalPaperExecutionOnly)
+        {
+            // [WALLET-GUARD] For live/testnet execution (real orders hit the exchange), we cannot
+            // safely start without knowing the real balance. A config fallback risks trading with
+            // the wrong seed quantity — sells would target wrong amounts, causing rejected orders
+            // or dangerous over/under-sizing on a live exchange.
+            // HALT and require manual restart after the API recovers.
+            _logger.LogCritical(
+                "WALLET | Balance check failed ({Error}) — LocalPaperExecutionOnly=false. " +
+                "REFUSING to start: real-order execution requires a confirmed balance. " +
+                "Restart the service once the Binance API is reachable.",
+                snapshot.Error ?? "unknown");
+            // Do not call StartCoreWithEth — bot stays stopped, requiring manual intervention.
+            return;
+        }
         else
         {
+            // Paper-only mode: all orders are locally simulated, so the config fallback is safe.
             startingEth = _options.StartingEth;
-            _logger.LogWarning("WALLET | Balance check failed ({Error}) — using config fallback: {Eth:F5} ETH",
+            _logger.LogWarning(
+                "WALLET | Balance check failed ({Error}) — using config fallback: {Eth:F5} ETH (paper-only mode)",
                 snapshot.Error ?? "unknown", startingEth);
         }
 
@@ -247,6 +264,37 @@ public class BotController
         {
             cycling.ResetSessionState();
             cycling.RestoreFromSession(sessionId, _db);
+
+            // [RESUME-GUARD] Detect the "phantom sell" scenario (Trace 1 / DI-001):
+            // An open cycle in DB means the sell fired in GetIntent(), but if no sell trade
+            // exists in the Trades table, the sell never applied to the portfolio.
+            // The crash window was between ApplyFillAndRecordTrade and InsertTrade (now fixed by C-3,
+            // but may still occur for sessions that crashed before C-3 was deployed).
+            //
+            // Symptoms: cs.ActiveSell=true, portfolio.Cash ≈ StartingCash (no sell credit),
+            // but DB has an open cycle row. If left uncorrected the rebuy path would buy
+            // using ALL cash (not just the sell proceeds), creating a phantom profit record.
+            var openCycles = _db.GetOpenCyclesForSession(sessionId);
+            foreach (var oc in openCycles)
+            {
+                var hasSellTrade = trades.Any(t =>
+                    t.Side == TradeSide.Sell &&
+                    string.Equals(t.Symbol, oc.Symbol, StringComparison.OrdinalIgnoreCase));
+
+                if (!hasSellTrade)
+                {
+                    _logger.LogCritical(
+                        "RESUME INCONSISTENCY | Open cycle {CycleId} for {Symbol} (sell @ {Price:F2}) " +
+                        "has NO corresponding sell trade in DB — sell did not apply to portfolio. " +
+                        "Marking cycle abandoned to prevent phantom rebuy with wrong cash amount.",
+                        oc.Id, oc.Symbol, oc.SellPrice);
+
+                    _db.MarkCycleAbandoned(oc.Id);
+
+                    // Clear the ActiveSell that RestoreFromSession just set — the cycle is abandoned.
+                    cycling.ResetSessionState();
+                }
+            }
         }
         _pipeline.SetStrategy(strategy);
 
