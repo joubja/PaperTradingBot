@@ -13,14 +13,15 @@
             ₿ PaperTradingBot
         </MudText>
         <MudSpacer />
-        <MudButton Href="/" Variant="Variant.Text" Color="Color.Inherit" Size="Size.Small"
-                   StartIcon="@Icons.Material.Filled.Dashboard">Dashboard</MudButton>
-        <MudButton Href="/history" Variant="Variant.Text" Color="Color.Inherit" Size="Size.Small"
-                   StartIcon="@Icons.Material.Filled.History">History</MudButton>
-        <MudButton Href="/settings" Variant="Variant.Text" Color="Color.Inherit" Size="Size.Small"
-                   StartIcon="@Icons.Material.Filled.Tune">Settings</MudButton>
-        <MudSpacer />
-        <MudText Typo="Typo.caption" Style="opacity:0.6;">paper trading — no real money</MudText>
+        <MudTooltip Text="Dashboard">
+            <MudIconButton Href="/" Icon="@Icons.Material.Filled.Dashboard" Color="Color.Inherit" Size="Size.Small" />
+        </MudTooltip>
+        <MudTooltip Text="History">
+            <MudIconButton Href="/history" Icon="@Icons.Material.Filled.History" Color="Color.Inherit" Size="Size.Small" />
+        </MudTooltip>
+        <MudTooltip Text="Settings">
+            <MudIconButton Href="/settings" Icon="@Icons.Material.Filled.Tune" Color="Color.Inherit" Size="Size.Small" />
+        </MudTooltip>
     </MudAppBar>
 
     <MudMainContent Style="padding-top:64px;">
