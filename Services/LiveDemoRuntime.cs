@@ -254,8 +254,9 @@ public class LiveDemoRuntime : ITradingRuntime
                 cancellationToken);
 
             _logger.LogInformation(
-                "BAR DECISION | Symbol={Symbol} Status={Status} HistoryCount={HistoryCount} Reason={Reason}",
+                "BAR DECISION | Symbol={Symbol} Price={Price:F2} Status={Status} HistoryCount={HistoryCount} Reason={Reason}",
                 decision.Symbol,
+                candle.Close,
                 decision.Status,
                 decision.HistoryCount,
                 decision.Reason);
