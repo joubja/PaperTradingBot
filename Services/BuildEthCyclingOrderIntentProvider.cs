@@ -37,8 +37,6 @@ namespace PaperTradingBot.Services;
 /// </summary>
 public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 {
-    // Warmup: 90 × 10s bars → ~15 completed 1-min HTF periods, enough for RSI to seed
-    private const int Warmup = 90;
     private const int FastEma = 9;
     private const int SlowEma = 21;
     private const int RsiPeriod = 14;
@@ -134,9 +132,9 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
             _cycleState[symbol] = csWarm;
         }
 
-        if (history.Count < Warmup)
+        if (history.Count < _options.Runtime.WarmupBars)
         {
-            var secsLeft = (Warmup - history.Count) * 10;
+            var secsLeft = (_options.Runtime.WarmupBars - history.Count) * 10;
             var minsLeft = secsLeft / 60;
             var timeLeft = minsLeft >= 1 ? $"~{minsLeft}m" : $"~{secsLeft}s";
 
@@ -150,7 +148,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 var wDip       = csWarm.SellPrice > 0m ? (csWarm.SellPrice - csWarm.TrailingLow) / csWarm.SellPrice : 0m;
 
                 _state.NotifyStrategyStatus(new("WarmingUp",
-                    $"Warming up ({history.Count}/{Warmup}, {timeLeft}) — cycle active | sold {csWarm.SellQty:F3} ETH @ ${csWarm.SellPrice:F2} | dip {wDip:P2}",
+                    $"Warming up ({history.Count}/{_options.Runtime.WarmupBars}, {timeLeft}) — cycle active | sold {csWarm.SellQty:F3} ETH @ ${csWarm.SellPrice:F2} | dip {wDip:P2}",
                     SellPrice:    csWarm.SellPrice,
                     SellQty:      csWarm.SellQty,
                     CurrentDropPct: wDip,
@@ -159,10 +157,10 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
             else
             {
                 _state.NotifyStrategyStatus(new("WarmingUp",
-                    $"Building RSI & indicator history — {history.Count}/{Warmup} bars ({timeLeft} remaining)"));
+                    $"Building RSI & indicator history — {history.Count}/{_options.Runtime.WarmupBars} bars ({timeLeft} remaining)"));
             }
 
-            return OrderIntent.None($"Warming up ({history.Count}/{Warmup})");
+            return OrderIntent.None($"Warming up ({history.Count}/{_options.Runtime.WarmupBars})");
         }
 
         // Snapshot live settings once per bar so all logic below uses consistent values
