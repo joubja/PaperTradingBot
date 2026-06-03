@@ -12,19 +12,18 @@
 
 <MudLayout>
     <MudAppBar Elevation="1" Color="Color.Dark" Dense="true">
+        @{
+            var _isTest = BotOpts.Value.Runtime.LocalPaperExecutionOnly
+                || BotOpts.Value.Providers.Binance.RestApiUrl.Contains("testnet", StringComparison.OrdinalIgnoreCase);
+        }
         <span style="display:flex;align-items:center;gap:7px;font-weight:700;letter-spacing:1px;font-size:1.1rem;color:#e0e0e0;">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" style="flex-shrink:0;">
                 <path fill="#00b4d8" d="M11.944 17.97L4.58 13.62 11.943 24l7.37-10.38-7.372 4.35h.003zM12.056 0L4.69 12.223l7.365 4.354 7.365-4.35L12.056 0z"/>
             </svg>
-            AETHER
-            @if (BotOpts.Value.Runtime.LocalPaperExecutionOnly)
-            {
-                <span style="font-size:0.7rem;font-weight:400;color:#ffab40;letter-spacing:2px;margin-left:2px;">— TEST</span>
-            }
-            else
-            {
-                <span style="font-size:0.7rem;font-weight:400;color:#00e676;letter-spacing:2px;margin-left:2px;">— LIVE</span>
-            }
+            AETHER TradingBot
+            <span style="font-size:0.7rem;font-weight:400;letter-spacing:2px;margin-left:2px;color:@(_isTest ? "#ffab40" : "#00e676");">
+                — @(_isTest ? "TEST" : "LIVE")
+            </span>
         </span>
         <MudSpacer />
         <MudTooltip Text="Dashboard">
