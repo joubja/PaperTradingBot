@@ -172,7 +172,10 @@
     }
 
     <!-- ── Metric cards ─────────────────────────────────────────────────── -->
-    <MudGrid Class="mb-4">
+    @{
+        var livePrice = State.RecentCandles.LastOrDefault()?.Close ?? 0m;
+    }
+    <MudGrid Class="mb-2">
         @foreach (var m in GetMetrics())
         {
             <MudItem xs="6" sm="4" md="2">
@@ -182,9 +185,8 @@
                 </div>
             </MudItem>
         }
-        @{
-            var livePrice = State.RecentCandles.LastOrDefault()?.Close ?? 0m;
-        }
+    </MudGrid>
+    <MudGrid Justify="Justify.FlexEnd" Class="mb-4">
         <MudItem xs="6" sm="4" md="2">
             <div style="background:#12121a;border:2px solid #00b4d8;border-radius:12px;padding:16px;text-align:center;box-shadow:0 0 18px rgba(0,180,216,0.35);">
                 <div style="font-size:2rem;font-weight:700;line-height:1.2;color:#00b4d8;letter-spacing:1px;">
