@@ -182,6 +182,15 @@
                 </div>
             </MudItem>
         }
+        @{
+            var livePrice = State.RecentCandles.LastOrDefault()?.Close ?? 0m;
+        }
+        <MudItem xs="6" sm="4" md="2">
+            <div class="price-card">
+                <div class="price-value">@(livePrice > 0m ? $"${livePrice:F2}" : "—")</div>
+                <div class="metric-label">ETH Price</div>
+            </div>
+        </MudItem>
     </MudGrid>
 
     <!-- ── Charts ───────────────────────────────────────────────────────── -->

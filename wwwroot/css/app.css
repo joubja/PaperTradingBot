@@ -31,6 +31,24 @@ html, body {
 .negative { color: #ff5252; }
 .neutral  { color: #90e0ef; }
 
+/* Standout real-time price card */
+.price-card {
+    background: #12121a;
+    border: 1px solid #00b4d8;
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    box-shadow: 0 0 12px rgba(0,180,216,0.18);
+}
+
+.price-value {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #00b4d8;
+    letter-spacing: 1px;
+}
+
 /* Cycle row colours */
 .cycle-profit    { background: rgba(0,230,118,0.06); }
 .cycle-loss      { background: rgba(255,82,82,0.06); }
