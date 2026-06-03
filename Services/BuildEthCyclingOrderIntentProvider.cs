@@ -237,6 +237,31 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 
             if (dipEnoughAndBouncing || rsiOversold)
             {
+                // [SM-014] Compute rebuy quantity BEFORE mutating any state.
+                // If cash is zero the sell never applied to the portfolio — stay in ActiveSell
+                // and retry on the next bar rather than silently abandoning the cycle.
+                var rebuyCash     = _portfolio.GetCash();
+                var rebuyStep     = GetSymbolConfig(symbol)?.QuantityStep ?? 0.001m;
+                var feeMultiplier = 1m + _options.TakerFeePercent / 100m;
+                var rebuyQty      = rebuyCash > 0m && close > 0m
+                    ? RoundDownToStep(rebuyCash / (close * feeMultiplier), rebuyStep)
+                    : 0m;
+
+                if (rebuyQty <= 0m)
+                {
+                    _logger.LogWarning(
+                        "CYCLE REBUY SKIPPED | {Symbol} rebuyQty=0 — cash={Cash:F2} USDT. " +
+                        "Keeping ActiveSell=true to retry. " +
+                        "If cash is always zero the sell may not have applied to the portfolio.",
+                        symbol, rebuyCash);
+                    // Stay in ActiveSell — do NOT reset state, do NOT close DB row.
+                    _state.NotifyStrategyStatus(new("ActiveSell",
+                        $"Waiting for rebuy (no cash!) — sold {cs.SellQty:F3} ETH @ ${cs.SellPrice:F2} | dip {dipDepth:P2}",
+                        SellPrice: cs.SellPrice, SellQty: cs.SellQty,
+                        CurrentDropPct: dipDepth, MinDropPct: minDrop));
+                    return OrderIntent.None($"Rebuy skipped — cash={rebuyCash:F2} USDT | {ctx}");
+                }
+
                 // Capture before state reset so the event carries the original sell context
                 var priorSellQty   = cs.SellQty;
                 var priorSellPrice = cs.SellPrice;
@@ -265,13 +290,6 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 
                 var strength = Math.Round(Math.Clamp((rsiCycleRebuy - rsi + 10) / 30m, 0m, 1m), 4);
 
-                var rebuyCash     = _portfolio.GetCash();
-                var rebuyStep     = GetSymbolConfig(symbol)?.QuantityStep ?? 0.001m;
-                var feeMultiplier = 1m + _options.TakerFeePercent / 100m;
-                var rebuyQty      = rebuyCash > 0m && close > 0m
-                    ? RoundDownToStep(rebuyCash / (close * feeMultiplier), rebuyStep)
-                    : 0m;
-
                 if (priorFeatures.Length > 0)
                     _state.NotifyCycleCompleted(new CycleCompletedEvent
                     {
@@ -293,7 +311,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     Reason                 = $"Cycle rebuy | dip={dipDepth:P2} bounce={bounceFromLow:P2} RSI={rsi:F1} | {ctx}",
                     SignalStrength         = strength,
                     IndicatorContext       = ctx,
-                    TargetQuantityOverride = rebuyQty > 0m ? rebuyQty : (decimal?)null,
+                    TargetQuantityOverride = rebuyQty,
                     CycleId                = priorCycleId   // runtime corrects DB with actual fill qty
                 };
             }
@@ -403,16 +421,29 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     ? RoundDownToStep(rebuyCash / (close * (1m + feeRate)), rcvStep)
                     : 0m;
 
+                // [SM-014-recovery] Check cash BEFORE clearing shadow state.
+                // If cash=0 the original sell never applied — keep PostAbandon watch alive to retry.
+                if (rcvQty <= 0m)
+                {
+                    _logger.LogWarning(
+                        "RECOVERY REBUY SKIPPED | {Symbol} rcvQty=0 — cash={Cash:F2} USDT. " +
+                        "Keeping PostAbandon watch active (sell may not have applied to portfolio).",
+                        symbol, rebuyCash);
+                    // Do NOT clear PostAbandonSellPrice — recovery watch stays active.
+                    return OrderIntent.None($"Recovery rebuy skipped — no cash | {ctx}");
+                }
+
                 var priorSellPrice = cs.PostAbandonSellPrice;
                 var priorSellQty   = cs.PostAbandonSellQty;
                 var priorSellTs    = cs.PostAbandonSellTs;
 
+                // Only clear shadow state now that we know we have cash to rebuy.
                 cs.PostAbandonSellPrice = 0m;
                 cs.PostAbandonSellQty   = 0m;
                 cs.PostAbandonSellTs    = default;
                 cs.CooldownBarsLeft     = cycleCooldownBars;
 
-                if (rcvQty > 0m && _state.ActiveSessionId is not null)
+                if (_state.ActiveSessionId is not null)
                 {
                     var netGain = rcvQty - priorSellQty;
                     _logger.LogInformation(
@@ -442,10 +473,6 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                         CycleId                = recoveryRowId  // runtime corrects DB with actual fill qty
                     };
                 }
-                // No cash available — log and abandon shadow state
-                _logger.LogWarning(
-                    "RECOVERY REBUY SKIPPED | {Symbol} rcvQty rounds to zero — no usable cash (cash={Cash:F2})",
-                    symbol, _portfolio.GetCash());
             }
             } // end else (recovery watch still active)
         }
@@ -537,6 +564,12 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 
                             if (_state.ActiveSessionId is not null)
                                 cs.OpenCycleId = _db.OpenCycle(_state.ActiveSessionId, symbol, sellQty, close);
+                            else
+                                // [SM-009] Sell fires with no active session — cycle won't be persisted.
+                                // This indicates a lifecycle bug (LaunchRuntime not called, or session not started).
+                                _logger.LogError(
+                                    "SELL WITHOUT SESSION | {Symbol} ActiveSessionId is null — cycle will not be recorded in DB",
+                                    symbol);
 
                             var breakEvenForStatus = 2m * _options.TakerFeePercent / 100m;
                             var minDrop = Math.Max(breakEvenForStatus * 1.1m, 0.005m);
@@ -558,7 +591,8 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                                 Reason                 = $"Cycle partial sell | RSI={rsi:F1} sellPct={adaptiveSellPct:P0} abandon>{adaptiveAbandon:P1} avgEntry={avgEntry:F4} | {ctx}",
                                 SignalStrength         = strength,
                                 IndicatorContext       = ctx,
-                                TargetQuantityOverride = sellQty
+                                TargetQuantityOverride = sellQty,
+                                CycleId                = cs.OpenCycleId   // [DI-002] Allows runtime to clean up the DB row on fill rejection
                             };
                         }
                     }

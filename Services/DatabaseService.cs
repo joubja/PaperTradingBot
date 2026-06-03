@@ -356,7 +356,8 @@ public class DatabaseService : IDisposable
     private static CycleResult MapCycleResult(dynamic r) => new()
     {
         SellTimestamp  = DateTime.Parse((string)r.SellTimestamp),
-        BuyTimestamp   = DateTime.Parse((string)r.BuyTimestamp),
+        // [SM-011] BuyTimestamp can be NULL for crash-interrupted cycles — guard against cast failure.
+        BuyTimestamp   = r.BuyTimestamp is string bt ? DateTime.Parse(bt) : DateTime.UtcNow,
         Symbol         = (string)r.Symbol,
         SoldQuantity   = (decimal)(double)r.SoldQuantity,
         SellPrice      = (decimal)(double)r.SellPrice,

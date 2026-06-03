@@ -124,20 +124,26 @@ public class LiveDemoRuntime : ITradingRuntime
             var resolvedSymbol = ResolveInternalSymbol(quote.Symbol);
             var px = quote.Last ?? Mid(quote.Bid, quote.Ask) ?? 0m;
             _lastPriceBySymbol[resolvedSymbol] = px;
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "QUOTE | Provider={Provider} ProviderSymbol={ProviderSymbol} Symbol={Symbol} Px={Px:F4} Ts={Ts:u}",
                 quote.Provider, quote.Symbol, resolvedSymbol, px, quote.TimestampUtc);
             _barAggregationService.OnQuote(quote);
         };
         Action<LiveBar>   onBarClosed = bar =>
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "BAR CLOSED EVENT | Provider={Provider} ProviderSymbol={ProviderSymbol} O={Open:F4} H={High:F4} L={Low:F4} C={Close:F4} Start={Start:u} End={End:u}",
                 bar.Provider, bar.Symbol, bar.Open, bar.High, bar.Low, bar.Close, bar.StartUtc, bar.EndUtc);
             _ = Task.Run(async () =>
             {
                 try   { await ProcessClosedBarAsync(bar, cancellationToken); }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException)
+                {
+                    // [OBS-001] Log cancellation so we can trace state at the time bars were dropped.
+                    _logger.LogDebug(
+                        "BAR CANCELLED | {Symbol} {End:u} — processing interrupted by cancellation token",
+                        bar.Symbol, bar.EndUtc);
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Unhandled exception processing bar {Symbol} {End:u}", bar.Symbol, bar.EndUtc);
@@ -179,12 +185,21 @@ public class LiveDemoRuntime : ITradingRuntime
             if (_marketDataFeed is not null)
                 await _marketDataFeed.DisconnectAsync(CancellationToken.None);
 
-            await EmitLiveDemoSummaryAsync(CancellationToken.None);
-
-            if (!string.IsNullOrEmpty(_sessionId))
-                _db.EndSession(_sessionId, _portfolioStateStore.GetTotalEquity(_lastPriceBySymbol));
-
-            _botState.NotifyStopped();
+            // [ATOMICITY-05] EndSession must always run even if the summary export fails.
+            try
+            {
+                await EmitLiveDemoSummaryAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SESSION SUMMARY | Failed to emit live demo summary — session will still be closed");
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(_sessionId))
+                    _db.EndSession(_sessionId, _portfolioStateStore.GetTotalEquity(_lastPriceBySymbol));
+                _botState.NotifyStopped();
+            }
         }
     }
 

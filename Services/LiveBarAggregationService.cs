@@ -136,7 +136,7 @@ public class LiveBarAggregationService : IBarAggregationService, IDisposable
             _high = !_high.HasValue ? price : Math.Max(_high.Value, price);
             _low = !_low.HasValue ? price : Math.Min(_low.Value, price);
             _close = price;
-            _volume += 0m;
+            _volume += 1m; // tick count proxy — each bookTicker update = 1 tick
         }
 
         public LiveBar CloseCurrentBar()

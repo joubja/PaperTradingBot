@@ -155,7 +155,14 @@ public class BotController
             if (IsRunning)
             {
                 if (_activeRuntime != null)
-                    try { await _activeRuntime.ForceRebuyCyclesAsync(); } catch { }
+                    try { await _activeRuntime.ForceRebuyCyclesAsync(); }
+                    catch (Exception ex)
+                    {
+                        // [OBS-007] Do not silently swallow — orphaned open cycle rows will persist in DB.
+                        _logger.LogError(ex,
+                            "FORCE REBUY FAILED | Open cycle rows may remain unclosed. " +
+                            "Proceeding with archive — check DB for IsComplete=0 rows.");
+                    }
 
                 _cts?.Cancel();
                 if (_botTask != null)
@@ -210,10 +217,8 @@ public class BotController
 
         _portfolio.Reset(_options.StartingCash);
 
-        // Seed ETH position immediately so the portfolio is correct before the first bar fires.
-        // Price is 0 as a placeholder; the actual seed price is set on the first live bar.
-        if (startingEth > 0m)
-            _portfolio.SeedPosition("ETHUSDT", startingEth, 0m);
+        // [H-12] Do NOT seed ETH here with avgEntry=0 — that taints the sell-price break-even check
+        // and overstates PnL. ProcessClosedBarAsync seeds from the real first-bar market price instead.
 
         _recorder.Reset(_options.StartingCash);
         _pipeline.Reset(_options.Symbols.Select(s => s.Symbol));
@@ -264,6 +269,8 @@ public class BotController
         _state.NotifyStarted(strategyName, sessionId, _options.StartingCash, startingEth);
         if (!resumeMode)
             _state.NotifyCyclingUpdate(true, _db.GetRecentCompleteCycles(sessionId, limit: 20));
+        // [C-4-partial] Dispose previous CTS before replacing — prevents kernel handle leak across stop/start cycles.
+        _cts?.Dispose();
         _cts           = new CancellationTokenSource();
         _activeRuntime = _sp.GetRequiredService<LiveDemoRuntime>();
         _activeRuntime.SetSessionId(sessionId);

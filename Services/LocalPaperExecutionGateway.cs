@@ -23,6 +23,9 @@ public class LocalPaperExecutionGateway : ILocalPaperExecutionGateway
         DemoOrderRequest request,
         CancellationToken cancellationToken)
     {
+        // [CONC-012] Respect cancellation — live gateways rely on this to abort in-flight HTTP orders.
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (request is null)
         {
             return Task.FromResult(new LocalPaperFillResult

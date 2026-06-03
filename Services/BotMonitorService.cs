@@ -13,8 +13,10 @@ public class BotMonitorService : BackgroundService
     private readonly NotificationOptions _opts;
     private readonly ILogger<BotMonitorService> _logger;
 
-    private bool     _noTradeAlertSent = false;
-    private DateOnly _lastDailySummary = DateOnly.MinValue;
+    private bool     _noTradeAlertSent        = false;
+    private bool     _stuckStateAlertSent     = false;
+    private bool     _cyclingSuspendedAlert   = false;
+    private DateOnly _lastDailySummary        = DateOnly.MinValue;
 
     public BotMonitorService(
         NotificationService notify,
@@ -41,6 +43,8 @@ public class BotMonitorService : BackgroundService
             {
                 await CheckNoTradeAlert();
                 await CheckDailySummary();
+                await CheckStuckStateAsync();
+                await CheckCyclingSuspendedAsync();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -48,6 +52,66 @@ public class BotMonitorService : BackgroundService
             }
 
             await Task.Delay(TimeSpan.FromMinutes(10), ct);
+        }
+    }
+
+    // ── Stuck-state alert: ActiveSell with no cash ────────────────────────────
+
+    // [ALERT-01] Detects the confirmed incident scenario: the strategy believes it sold ETH
+    // (cs.ActiveSell=true) but the portfolio has no USDT cash — meaning the sell never applied.
+    private async Task CheckStuckStateAsync()
+    {
+        if (!_opts.Enabled) return;
+        if (!_state.IsRunning) { _stuckStateAlertSent = false; return; }
+
+        var phase = _state.StrategyStatus?.Phase;
+        var cash  = _state.Cash;
+
+        if (phase == "ActiveSell" && cash < 1m && !_stuckStateAlertSent)
+        {
+            _stuckStateAlertSent = true;
+            var ethQty = _state.Positions.TryGetValue("ETHUSDT", out var pos) ? pos.Quantity : 0m;
+            _logger.LogCritical(
+                "STUCK_STATE | Phase=ActiveSell but Cash={Cash:F2} USDT — sell may not have applied to portfolio. ETH held={Eth:F5}",
+                cash, ethQty);
+            await _notify.SendAsync(
+                "CRITICAL: Bot stuck in ActiveSell with no cash",
+                $"Phase=ActiveSell but Cash={cash:F2} USDT.\n" +
+                $"The sell likely did not apply to the portfolio — manual intervention required.\n\n" +
+                $"ETH held:  {ethQty:F5}\n" +
+                $"Status:    {_state.StrategyStatus?.Summary ?? "unknown"}");
+        }
+        else if (phase != "ActiveSell")
+        {
+            _stuckStateAlertSent = false;
+        }
+    }
+
+    // ── Cycling suspension alert ──────────────────────────────────────────────
+
+    // [ALERT-03] Notifies when cycling suspends — the primary profit mechanism stopping
+    // is a significant event that should not wait until the daily summary.
+    private async Task CheckCyclingSuspendedAsync()
+    {
+        if (!_opts.Enabled) return;
+        if (!_state.IsRunning) { _cyclingSuspendedAlert = false; return; }
+
+        if (!_state.CyclingEnabled && !_cyclingSuspendedAlert)
+        {
+            _cyclingSuspendedAlert = true;
+            var ethQty = _state.Positions.TryGetValue("ETHUSDT", out var pos) ? pos.Quantity : 0m;
+            _logger.LogWarning("MONITOR | Cycling suspended — sending alert");
+            await _notify.SendAsync(
+                "Cycling suspended",
+                $"The bot has suspended cycling after consecutive loss cycles.\n\n" +
+                $"ETH held: {ethQty:F5}\n" +
+                $"Phase:    {_state.StrategyStatus?.Phase}\n" +
+                $"Status:   {_state.StrategyStatus?.Summary}\n\n" +
+                $"Cycling will re-enable automatically based on RSI and elapsed time.");
+        }
+        else if (_state.CyclingEnabled)
+        {
+            _cyclingSuspendedAlert = false;
         }
     }
 
@@ -61,7 +125,18 @@ public class BotMonitorService : BackgroundService
         if (!_state.IsRunning) { _noTradeAlertSent = false; return; }
 
         var lastTrade = _state.LastTradeAt;
-        if (lastTrade == DateTime.MinValue) return;   // no trade yet this session
+
+        // [OBS-004] If no trade has ever occurred, use session start time so the alert
+        // fires after NoTradeAlertHours of running — not silently forever.
+        if (lastTrade == DateTime.MinValue)
+        {
+            var sessionAge = _state.SessionStartedAt != DateTime.MinValue
+                ? DateTime.UtcNow - _state.SessionStartedAt
+                : TimeSpan.Zero;
+            if (sessionAge.TotalHours < _opts.NoTradeAlertHours || _noTradeAlertSent)
+                return;
+            lastTrade = _state.SessionStartedAt; // use session start as reference for message
+        }
 
         var silentFor = DateTime.UtcNow - lastTrade;
 

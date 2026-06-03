@@ -65,9 +65,15 @@ public class BarDecisionPipeline : IBarDecisionPipeline
 
         history.Add(candle);
 
+        // [H-3] Cap history to prevent unbounded memory growth — 500 bars ≈ 83 minutes at 10s bars,
+        // well above the maximum indicator lookback used by any strategy.
+        const int MaxHistoryBars = 500;
+        if (history.Count > MaxHistoryBars)
+            history.RemoveRange(0, history.Count - MaxHistoryBars);
+
         var currentDate = DateOnly.FromDateTime(candle.Timestamp);
 
-        _logger.LogInformation(
+        _logger.LogDebug(
             "PIPELINE INPUT | Symbol={Symbol} Close={Close:F4} HistoryCount={HistoryCount} Equity={Equity:F2} PositionValue={PositionValue:F2}",
             symbol,
             candle.Close,
@@ -81,7 +87,7 @@ public class BarDecisionPipeline : IBarDecisionPipeline
 
         if (intent is null || !intent.IsActionable)
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "PIPELINE RESULT | Symbol={Symbol} Status={Status} Reason={Reason}",
                 symbol,
                 BarDecisionStatus.NoAction,
@@ -100,7 +106,7 @@ public class BarDecisionPipeline : IBarDecisionPipeline
             });
         }
 
-        _logger.LogInformation(
+        _logger.LogDebug(
             "PIPELINE INTENT | Symbol={Symbol} IntentType={IntentType} OrderType={OrderType} TIF={TimeInForce} Strength={Strength:F4}",
             symbol,
             intent.IntentType,
@@ -164,7 +170,7 @@ public class BarDecisionPipeline : IBarDecisionPipeline
             });
         }
 
-        _logger.LogInformation(
+        _logger.LogDebug(
             "PIPELINE RESULT | Symbol={Symbol} Status={Status} Reason={Reason}",
             symbol,
             BarDecisionStatus.Ready,
