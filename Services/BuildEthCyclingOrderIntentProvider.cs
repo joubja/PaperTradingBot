@@ -37,6 +37,25 @@ namespace PaperTradingBot.Services;
 /// </summary>
 public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 {
+    // ══════════════════════════════════════════════════════════════════════════════
+    // DO NOT LOWER THIS VALUE — IT IS NOT JUST A "WAIT" TIMER.
+    //
+    // RSI runs on 1-MINUTE aggregated (HTF) closes. It needs 15 HTF bars to produce
+    // a valid reading. At 10s bars that is 15 × 6 = 90 raw bars = 15 wall-clock minutes.
+    // Below 90, RSI is always 50 (neutral): sell signals NEVER fire, RSI rebuy NEVER
+    // fires, and cycle re-enable via RSI dip NEVER fires — strategy is effectively blind.
+    //
+    // Additional indicator minimums that break below 90:
+    //   EMA(21)  → 0 at bar 20 — fastEma > slowEma is spuriously true
+    //   EMA(50)  → 0 until bar 50 — trend filter condition (close > 0) always passes
+    //   MACD     → (0,0,0) until bar 35 — display only but misleading
+    //   ATR(14)  → valid from bar 15 but under-smoothed until ~30 bars
+    //
+    // Making this configurable was tested and reverted: a lower setting does NOT speed
+    // up signal testing — it just skips to "waiting for RSI" sooner while all RSI-based
+    // paths remain dead until 15 real minutes have passed anyway.
+    // ══════════════════════════════════════════════════════════════════════════════
+    private const int Warmup = 90;
     private const int FastEma = 9;
     private const int SlowEma = 21;
     private const int RsiPeriod = 14;
@@ -132,9 +151,9 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
             _cycleState[symbol] = csWarm;
         }
 
-        if (history.Count < _options.Runtime.WarmupBars)
+        if (history.Count < Warmup)
         {
-            var secsLeft = (_options.Runtime.WarmupBars - history.Count) * 10;
+            var secsLeft = (Warmup - history.Count) * 10;
             var minsLeft = secsLeft / 60;
             var timeLeft = minsLeft >= 1 ? $"~{minsLeft}m" : $"~{secsLeft}s";
 
@@ -148,7 +167,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 var wDip       = csWarm.SellPrice > 0m ? (csWarm.SellPrice - csWarm.TrailingLow) / csWarm.SellPrice : 0m;
 
                 _state.NotifyStrategyStatus(new("WarmingUp",
-                    $"Warming up ({history.Count}/{_options.Runtime.WarmupBars}, {timeLeft}) — cycle active | sold {csWarm.SellQty:F3} ETH @ ${csWarm.SellPrice:F2} | dip {wDip:P2}",
+                    $"Warming up ({history.Count}/{Warmup}, {timeLeft}) — cycle active | sold {csWarm.SellQty:F3} ETH @ ${csWarm.SellPrice:F2} | dip {wDip:P2}",
                     SellPrice:    csWarm.SellPrice,
                     SellQty:      csWarm.SellQty,
                     CurrentDropPct: wDip,
@@ -157,10 +176,10 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
             else
             {
                 _state.NotifyStrategyStatus(new("WarmingUp",
-                    $"Building RSI & indicator history — {history.Count}/{_options.Runtime.WarmupBars} bars ({timeLeft} remaining)"));
+                    $"Building RSI & indicator history — {history.Count}/{Warmup} bars ({timeLeft} remaining)"));
             }
 
-            return OrderIntent.None($"Warming up ({history.Count}/{_options.Runtime.WarmupBars})");
+            return OrderIntent.None($"Warming up ({history.Count}/{Warmup})");
         }
 
         // Snapshot live settings once per bar so all logic below uses consistent values

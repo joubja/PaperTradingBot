@@ -120,13 +120,6 @@ public class RuntimeOptions
     /// </summary>
     public string StrategyName { get; set; } = "Demo";
 
-    /// <summary>
-    /// Number of 10-second bars required before the strategy starts trading.
-    /// 90 = ~15 min (production default — enough for RSI/EMA to seed properly).
-    /// Lower for testing (minimum ~21 for EMA-21 to stabilize).
-    /// </summary>
-    public int WarmupBars { get; set; } = 90;
-
     /// <summary>If true, the bot starts automatically when the process starts (service/systemd mode).</summary>
     public bool AutoStart { get; set; } = false;
 
