@@ -33,7 +33,7 @@ public class OrderIntent
     /// actual fill quantity and price after execution, correcting the pre-execution
     /// estimate written by CompleteCycleAndCheckFeasibility.
     /// </summary>
-    public int? CycleId { get; init; }
+    public int? CycleId { get; set; }
 
     public bool IsActionable =>
         IntentType == OrderIntentType.Buy || IntentType == OrderIntentType.Sell;

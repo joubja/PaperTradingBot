@@ -272,20 +272,15 @@ public class LiveDemoRuntime : ITradingRuntime
 
             if (!decision.IsReady || decision.Intent is null)
             {
-                // If the pipeline rejected a cycle sell that already committed state, roll back
-                // so the strategy is not left permanently stuck in ActiveSell with no cash.
+                // Roll back any in-memory sell state committed by GetIntent() before the pipeline ran.
+                // No DB cleanup needed here — the cycle row is only written after pipeline approval.
                 if (decision.Status == BarDecisionStatus.Rejected &&
-                    decision.Intent?.IntentType == OrderIntentType.Sell &&
-                    decision.Intent.CycleId.HasValue)
+                    decision.Intent?.IntentType == OrderIntentType.Sell)
                 {
-                    if (!string.IsNullOrEmpty(_sessionId))
-                    {
-                        _db.MarkCycleAbandoned(decision.Intent.CycleId.Value);
-                        _logger.LogWarning(
-                            "SELL REJECTED BY PIPELINE | CycleId={Id} reason={Reason} — cycle marked abandoned, sell state rolled back",
-                            decision.Intent.CycleId.Value, decision.Reason);
-                    }
                     _barDecisionPipeline.Strategy.RollbackSell(symbol);
+                    _logger.LogWarning(
+                        "SELL REJECTED BY PIPELINE | Symbol={Symbol} reason={Reason} — sell state rolled back",
+                        symbol, decision.Reason);
                 }
                 RecordEquityPoint(candle.Timestamp);
                 return;
@@ -320,8 +315,20 @@ public class LiveDemoRuntime : ITradingRuntime
                     symbol,
                     qtyValidation.ToSingleMessage());
 
+                if (decision.Intent.IntentType == OrderIntentType.Sell)
+                    _barDecisionPipeline.Strategy.RollbackSell(symbol);
+
                 RecordEquityPoint(candle.Timestamp);
                 return;
+            }
+
+            // Commit cycle sell to DB only after both pipeline and qty validation approve.
+            // This ensures no phantom cycle rows are created when a sell is blocked or invalid.
+            if (decision.Intent.IntentType == OrderIntentType.Sell && !string.IsNullOrEmpty(_sessionId))
+            {
+                var cycleId = _barDecisionPipeline.Strategy.CommitSellToDB(symbol, _sessionId);
+                if (cycleId.HasValue)
+                    decision.Intent.CycleId = cycleId;
             }
 
             var request = new DemoOrderRequest
@@ -354,14 +361,15 @@ public class LiveDemoRuntime : ITradingRuntime
                     request.Quantity,
                     fill.RejectionReason ?? "Unknown rejection");
 
-                // If the intent pre-wrote a cycle row (estimated qty), delete it so the DB
-                // doesn't contain a false completed cycle that never actually executed.
                 if (decision.Intent.CycleId.HasValue && !string.IsNullOrEmpty(_sessionId))
                 {
                     _db.DeleteCycleRow(decision.Intent.CycleId.Value);
-                    _logger.LogWarning("CYCLE ROW DELETED | CycleId={Id} — fill rejected, pre-written estimate removed",
+                    _logger.LogWarning("CYCLE ROW DELETED | CycleId={Id} — fill rejected, cycle row removed",
                         decision.Intent.CycleId.Value);
                 }
+
+                if (decision.Intent.IntentType == OrderIntentType.Sell)
+                    _barDecisionPipeline.Strategy.RollbackSell(symbol);
 
                 RecordEquityPoint(candle.Timestamp);
                 return;

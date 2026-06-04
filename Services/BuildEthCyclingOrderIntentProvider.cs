@@ -117,9 +117,27 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
     }
 
     /// <summary>
-    /// Called by LiveDemoRuntime when the pipeline rejected a sell intent after this strategy
-    /// already committed state (ActiveSell=true, OpenCycleId set). Resets the in-memory sell
-    /// state so the strategy is not permanently stuck in ActiveSell with no cash to rebuy.
+    /// Called by LiveDemoRuntime after pipeline + qty validation both approve a sell intent.
+    /// Inserts the cycle DB row and records the cycle ID on cs.OpenCycleId so the rebuy path
+    /// can close it later. Returns the new cycle ID, or null if nothing was committed.
+    /// </summary>
+    public int? CommitSellToDB(string symbol, string sessionId)
+    {
+        if (!_cycleState.TryGetValue(symbol, out var cs) || !cs.ActiveSell || cs.OpenCycleId.HasValue)
+            return null;
+        if (string.IsNullOrEmpty(sessionId))
+        {
+            _logger.LogError("SELL WITHOUT SESSION | {Symbol} — cycle will not be recorded in DB", symbol);
+            return null;
+        }
+        cs.OpenCycleId = _db.OpenCycle(sessionId, symbol, cs.SellQty, cs.SellPrice);
+        return cs.OpenCycleId;
+    }
+
+    /// <summary>
+    /// Called when a sell intent was rejected (pipeline, qty validation, or gateway) after
+    /// GetIntent() already committed in-memory state. Resets that state so the strategy is
+    /// not permanently stuck in ActiveSell with no cash to rebuy.
     /// </summary>
     public void RollbackSell(string symbol)
     {
@@ -598,14 +616,9 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                             cs.FeaturesAtSell = MarketFeatureExtractor.ToVector(
                                 CaptureSnapshot(symbol, history, rsi, atr, close, macd.Histogram, spreadPct, trendEmaVal));
 
-                            if (_state.ActiveSessionId is not null)
-                                cs.OpenCycleId = _db.OpenCycle(_state.ActiveSessionId, symbol, sellQty, close);
-                            else
-                                // [SM-009] Sell fires with no active session — cycle won't be persisted.
-                                // This indicates a lifecycle bug (LaunchRuntime not called, or session not started).
-                                _logger.LogError(
-                                    "SELL WITHOUT SESSION | {Symbol} ActiveSessionId is null — cycle will not be recorded in DB",
-                                    symbol);
+                            // DB row is written by CommitSellToDB() after the pipeline and qty
+                            // validation both approve — deferred here so rejections don't leave
+                            // phantom cycle rows. cs.OpenCycleId stays null until then.
 
                             var breakEvenForStatus = 2m * _options.TakerFeePercent / 100m;
                             var minDrop = Math.Max(breakEvenForStatus * 1.1m, 0.005m);
@@ -627,8 +640,8 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                                 Reason                 = $"Cycle partial sell | RSI={rsi:F1} sellPct={adaptiveSellPct:P0} abandon>{adaptiveAbandon:P1} avgEntry={avgEntry:F4} | {ctx}",
                                 SignalStrength         = strength,
                                 IndicatorContext       = ctx,
-                                TargetQuantityOverride = sellQty,
-                                CycleId                = cs.OpenCycleId   // [DI-002] Allows runtime to clean up the DB row on fill rejection
+                                TargetQuantityOverride = sellQty
+                                // CycleId stamped on by LiveDemoRuntime.CommitSellToDB() after approval
                             };
                         }
                     }
