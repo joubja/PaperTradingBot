@@ -27,6 +27,7 @@ public class BarDecisionPipeline : IBarDecisionPipeline
     }
 
     public void SetStrategy(IOrderIntentProvider provider) => _orderIntentProvider = provider;
+    public IOrderIntentProvider Strategy => _orderIntentProvider;
 
     public void Reset(IEnumerable<string> symbols)
     {

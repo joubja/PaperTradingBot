@@ -182,8 +182,17 @@ public class LiveDemoRuntime : ITradingRuntime
             _marketDataFeed.OnQuote       -= onQuote;
             _barAggregationService.OnBarClosed -= onBarClosed;
 
-            if (_marketDataFeed is not null)
-                await _marketDataFeed.DisconnectAsync(CancellationToken.None);
+            try
+            {
+                if (_marketDataFeed is not null)
+                    await _marketDataFeed.DisconnectAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // WebSocket may already be in an aborted/closed state on shutdown — log and continue
+                // so the inner finally (NotifyStopped) always runs regardless.
+                _logger.LogWarning(ex, "DisconnectAsync failed during shutdown — continuing cleanup");
+            }
 
             // [ATOMICITY-05] EndSession must always run even if the summary export fails.
             try
@@ -263,6 +272,21 @@ public class LiveDemoRuntime : ITradingRuntime
 
             if (!decision.IsReady || decision.Intent is null)
             {
+                // If the pipeline rejected a cycle sell that already committed state, roll back
+                // so the strategy is not left permanently stuck in ActiveSell with no cash.
+                if (decision.Status == BarDecisionStatus.Rejected &&
+                    decision.Intent?.IntentType == OrderIntentType.Sell &&
+                    decision.Intent.CycleId.HasValue)
+                {
+                    if (!string.IsNullOrEmpty(_sessionId))
+                    {
+                        _db.MarkCycleAbandoned(decision.Intent.CycleId.Value);
+                        _logger.LogWarning(
+                            "SELL REJECTED BY PIPELINE | CycleId={Id} reason={Reason} — cycle marked abandoned, sell state rolled back",
+                            decision.Intent.CycleId.Value, decision.Reason);
+                    }
+                    _barDecisionPipeline.Strategy.RollbackSell(symbol);
+                }
                 RecordEquityPoint(candle.Timestamp);
                 return;
             }

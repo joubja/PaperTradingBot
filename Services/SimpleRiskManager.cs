@@ -41,7 +41,9 @@ public class SimpleRiskManager : IRiskManager
             var maxPositionPct = _settings.MaxPositionValuePct;
             var targetSizePct  = _settings.TargetPositionValuePercent;
 
-            if (maxDailyLoss > 0m && _dayStartEquity > 0m)
+            // Sell orders are exits/profit-taking — blocking them when down makes the situation
+            // worse and leaves the strategy stuck in ActiveSell with no cash to rebuy.
+            if (maxDailyLoss > 0m && _dayStartEquity > 0m && context.IntentType != OrderIntentType.Sell)
             {
                 var dailyPnlPercent = ((context.TotalEquity - _dayStartEquity) / _dayStartEquity) * 100m;
                 if (dailyPnlPercent <= -maxDailyLoss)

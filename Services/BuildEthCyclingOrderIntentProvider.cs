@@ -117,6 +117,25 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
     }
 
     /// <summary>
+    /// Called by LiveDemoRuntime when the pipeline rejected a sell intent after this strategy
+    /// already committed state (ActiveSell=true, OpenCycleId set). Resets the in-memory sell
+    /// state so the strategy is not permanently stuck in ActiveSell with no cash to rebuy.
+    /// </summary>
+    public void RollbackSell(string symbol)
+    {
+        if (!_cycleState.TryGetValue(symbol, out var cs) || !cs.ActiveSell) return;
+        _logger.LogWarning(
+            "SELL ROLLBACK | {Symbol} pipeline rejected the sell intent — resetting ActiveSell state (CycleId={CycleId})",
+            symbol, cs.OpenCycleId);
+        cs.ActiveSell     = false;
+        cs.SellPrice      = 0m;
+        cs.SellQty        = 0m;
+        cs.TrailingLow    = 0m;
+        cs.OpenCycleId    = null;
+        cs.FeaturesAtSell = [];
+    }
+
+    /// <summary>
     /// Restores active sell cycle state after a crash by reading open (incomplete) cycles from
     /// the database. TrailingLow is conservatively reset to the sell price; AbandonRisePct is
     /// recomputed adaptively on the first bar.

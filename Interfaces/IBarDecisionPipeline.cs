@@ -6,6 +6,7 @@ public interface IBarDecisionPipeline
 {
     void Reset(IEnumerable<string> symbols);
     void SetStrategy(IOrderIntentProvider provider);
+    IOrderIntentProvider Strategy { get; }
 
     IReadOnlyList<Candle> GetHistory(string symbol);
 
