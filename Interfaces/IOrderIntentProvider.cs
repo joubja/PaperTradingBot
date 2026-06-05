@@ -15,5 +15,5 @@ public interface IOrderIntentProvider
     // Called when a sell intent was rejected (pipeline, qty validation, or gateway) after
     // GetIntent() already committed in-memory state. Resets that state so the strategy
     // is not stuck. Default no-op for strategies that don't use cycle state.
-    void RollbackSell(string symbol) { }
+    void RollbackSell(string symbol, string? reason = null) { }
 }

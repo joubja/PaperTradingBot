@@ -277,9 +277,9 @@ public class LiveDemoRuntime : ITradingRuntime
                 if (decision.Status == BarDecisionStatus.Rejected &&
                     decision.Intent?.IntentType == OrderIntentType.Sell)
                 {
-                    _barDecisionPipeline.Strategy.RollbackSell(symbol);
+                    _barDecisionPipeline.Strategy.RollbackSell(symbol, decision.Reason);
                     _logger.LogWarning(
-                        "SELL REJECTED BY PIPELINE | Symbol={Symbol} reason={Reason} — sell state rolled back",
+                        "SELL REJECTED BY PIPELINE | Symbol={Symbol} reason={Reason}",
                         symbol, decision.Reason);
                 }
                 RecordEquityPoint(candle.Timestamp);
@@ -316,7 +316,7 @@ public class LiveDemoRuntime : ITradingRuntime
                     qtyValidation.ToSingleMessage());
 
                 if (decision.Intent.IntentType == OrderIntentType.Sell)
-                    _barDecisionPipeline.Strategy.RollbackSell(symbol);
+                    _barDecisionPipeline.Strategy.RollbackSell(symbol, $"qty validation: {qtyValidation.ToSingleMessage()}");
 
                 RecordEquityPoint(candle.Timestamp);
                 return;
@@ -369,7 +369,7 @@ public class LiveDemoRuntime : ITradingRuntime
                 }
 
                 if (decision.Intent.IntentType == OrderIntentType.Sell)
-                    _barDecisionPipeline.Strategy.RollbackSell(symbol);
+                    _barDecisionPipeline.Strategy.RollbackSell(symbol, $"gateway rejected: {fill.RejectionReason ?? "unknown"}");
 
                 RecordEquityPoint(candle.Timestamp);
                 return;

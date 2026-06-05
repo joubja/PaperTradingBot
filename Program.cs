@@ -23,7 +23,7 @@ builder.Configuration
     .AddEnvironmentVariables();
 
 builder.Logging.ClearProviders();
-builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; });
+builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "yyyy-MM-dd HH:mm:ss "; });
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 var services = builder.Services;

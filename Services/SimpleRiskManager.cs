@@ -13,6 +13,7 @@ public class SimpleRiskManager : IRiskManager
 
     private DateOnly? _currentDay;
     private decimal _dayStartEquity;
+    private decimal _dayStartEthPrice;  // locked in on first risk-check of each UTC day
     private int _tradesToday;
 
     private readonly Dictionary<string, int> _lastTradeBarBySymbol = new(StringComparer.OrdinalIgnoreCase);
@@ -41,9 +42,28 @@ public class SimpleRiskManager : IRiskManager
             var maxPositionPct = _settings.MaxPositionValuePct;
             var targetSizePct  = _settings.TargetPositionValuePercent;
 
-            if (maxDailyLoss > 0m && _dayStartEquity > 0m)
+            // Lock in the start-of-day ETH price on the first risk check of each UTC day.
+            // Simultaneously recalibrate _dayStartEquity at this same price so both baselines
+            // are from the same instant — otherwise a price gap between midnight and the first
+            // bar of the day makes the daily P&L comparison mathematically inconsistent.
+            if (_dayStartEthPrice == 0m && context.CurrentPrice > 0m && context.CurrentSymbolMarketValue > 0m)
             {
-                var dailyPnlPercent = ((context.TotalEquity - _dayStartEquity) / _dayStartEquity) * 100m;
+                _dayStartEthPrice = context.CurrentPrice;
+                var ethQtyNow = context.CurrentSymbolMarketValue / context.CurrentPrice;
+                var cashNow   = context.TotalEquity - context.CurrentSymbolMarketValue;
+                _dayStartEquity = ethQtyNow * _dayStartEthPrice + cashNow;
+            }
+
+            if (maxDailyLoss > 0m && _dayStartEquity > 0m && _dayStartEthPrice > 0m)
+            {
+                // Value current ETH at the start-of-day price so that a 7% ETH price drop
+                // doesn't trip the circuit breaker — only actual trading losses do.
+                var ethQty         = context.CurrentPrice > 0m
+                                         ? context.CurrentSymbolMarketValue / context.CurrentPrice
+                                         : 0m;
+                var cash           = context.TotalEquity - context.CurrentSymbolMarketValue;
+                var adjustedEquity = ethQty * _dayStartEthPrice + cash;
+                var dailyPnlPercent = ((adjustedEquity - _dayStartEquity) / _dayStartEquity) * 100m;
                 if (dailyPnlPercent <= -maxDailyLoss)
                     return RiskCheckResult.Deny(
                         $"Blocked by max daily loss rule ({dailyPnlPercent:F2}% <= -{maxDailyLoss:F2}%)");
@@ -104,6 +124,7 @@ public class SimpleRiskManager : IRiskManager
 
         _currentDay = date;
         _dayStartEquity = currentEquity;
+        _dayStartEthPrice = 0m;  // reset; locked in on first CanQueueOrder call of the day
         _tradesToday = 0;
     }
 }

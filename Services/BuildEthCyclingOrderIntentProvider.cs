@@ -139,12 +139,12 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
     /// GetIntent() already committed in-memory state. Resets that state so the strategy is
     /// not permanently stuck in ActiveSell with no cash to rebuy.
     /// </summary>
-    public void RollbackSell(string symbol)
+    public void RollbackSell(string symbol, string? reason = null)
     {
         if (!_cycleState.TryGetValue(symbol, out var cs) || !cs.ActiveSell) return;
         _logger.LogWarning(
-            "SELL ROLLBACK | {Symbol} pipeline rejected the sell intent — resetting ActiveSell state (CycleId={CycleId})",
-            symbol, cs.OpenCycleId);
+            "SELL ROLLBACK | {Symbol} sell at {SellPrice:F2} rolled back (CycleId={CycleId}) — {Reason}",
+            symbol, cs.SellPrice, cs.OpenCycleId, reason ?? "no reason given");
         cs.ActiveSell     = false;
         cs.SellPrice      = 0m;
         cs.SellQty        = 0m;
