@@ -82,29 +82,29 @@
     @if (_selected != null)
     {
         <MudText Typo="Typo.subtitle1" Class="mb-3" Style="font-weight:600;">
-            @_selected.Strategy &nbsp;·&nbsp; @FormatDate(_selected.StartedAt)
+            @FormatStrategyName(_selected.Strategy) &nbsp;·&nbsp; @FormatDate(_selected.StartedAt)
         </MudText>
 
         <!-- Charts row -->
         <MudGrid Class="mb-4">
             <MudItem xs="12">
                 <MudPaper Elevation="0" Class="pa-3" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
-                    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">@BaseCurrency ACCUMULATED</MudText>
-                    @if (_ethCurve.Count > 0)
+                    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">CYCLE P&amp;L (@BaseCurrency per cycle)</MudText>
+                    @if (_cyclePnlPoints.Count > 0)
                     {
-                        <ApexChart TItem="EthQuantityPoint" Options="_ethChartOptions" Height="260" @key="@($"eth-{_selected?.Id}")">
-                            <ApexPointSeries TItem="EthQuantityPoint"
-                                             Items="_ethCurve"
-                                             Name="@BaseCurrency"
-                                             SeriesType="SeriesType.Area"
-                                             XValue="@(e => e.Timestamp.ToLocalTime().ToString("HH:mm:ss"))"
-                                             YValue="@(e => (decimal)e.Quantity)" />
+                        <ApexChart TItem="CyclePnl" Options="_cycleChartOptions" Height="260" @key="@($"cycle-{_selected?.Id}")">
+                            <ApexPointSeries TItem="CyclePnl"
+                                             Items="_cyclePnlPoints"
+                                             Name="Gain"
+                                             SeriesType="SeriesType.Bar"
+                                             XValue="@(c => c.Label)"
+                                             YValue="@(c => c.Gain)" />
                         </ApexChart>
                     }
                     else
                     {
                         <div Style="height:260px;display:flex;align-items:center;justify-content:center;color:#444;font-size:0.85rem;">
-                            No trades recorded for this session.
+                            No completed cycles for this session.
                         </div>
                     }
                 </MudPaper>
@@ -296,11 +296,13 @@
 </MudContainer>
 
 @code {
+    private record CyclePnl(string Label, decimal Gain);
+
     private List<SessionSummary>              _sessions            = new();
     private Dictionary<string, decimal>       _finalEthBySession   = new();
     private Dictionary<string, (int Total, int Wins)> _cycleStatsBySession = new();
     private SessionSummary?                   _selected;
-    private List<EthQuantityPoint>            _ethCurve            = new();
+    private List<CyclePnl>                    _cyclePnlPoints      = new();
     private List<Trade>                       _trades              = new();
     private List<(Trade Trade, decimal Eth)>  _tradesWithEth       = new();
     private List<CycleResult>                 _cycles              = new();
@@ -314,7 +316,7 @@
 
     // ── Chart options ─────────────────────────────────────────────────────────
 
-    private ApexChartOptions<EthQuantityPoint> _ethChartOptions = new();
+    private ApexChartOptions<CyclePnl> _cycleChartOptions = new();
 
     private string PrimarySymbol   => BotOpts.Value.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT";
     private string BaseCurrency    => PrimarySymbol.Replace("USDT", "").Replace("usdt", "");
@@ -324,21 +326,34 @@
 
     protected override void OnInitialized()
     {
-        var baseCcy = BaseCurrency;
-        _ethChartOptions = new ApexChartOptions<EthQuantityPoint>
+        var ccy = BaseCurrency;
+        _cycleChartOptions = new ApexChartOptions<CyclePnl>
         {
-            Chart   = new Chart  { Background = "transparent", Toolbar = new Toolbar { Show = false }, Animations = new Animations { Enabled = false } },
-            Stroke  = new Stroke { Curve = Curve.Smooth, Width = new List<double> { 2 } },
-            Fill    = new Fill   { Type = new List<FillType> { FillType.Gradient },
-                                   Gradient = new FillGradient { ShadeIntensity = 1, OpacityFrom = 0.40, OpacityTo = 0.05, Stops = new List<double> { 0, 100 } } },
+            Chart   = new Chart { Background = "transparent", Toolbar = new Toolbar { Show = false }, Animations = new Animations { Enabled = false } },
             Colors  = new List<string> { "#00e676" },
-            Grid    = new Grid   { BorderColor = "#1e1e2e" },
-            Xaxis   = new XAxis  { Labels = new XAxisLabels { Show = false } },
+            Grid    = new Grid  { BorderColor = "#1e1e2e" },
+            Xaxis   = new XAxis { Labels = new XAxisLabels { Show = true, Style = new AxisLabelStyle { Colors = "#666", FontSize = "10px" } } },
             Yaxis   = new List<YAxis>
             {
-                new() { ForceNiceScale = false, DecimalsInFloat = 5, Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {baseCcy}'; }}" } }
+                new() { Labels = new YAxisLabels { Formatter = $"function(v){{ return (v>=0?'+':'')+v.toFixed(5)+' {ccy}'; }}" } }
             },
-            Tooltip = new Tooltip { Theme = Mode.Dark, Style = new TooltipStyle { FontSize = "13px" } }
+            Tooltip = new Tooltip { Theme = Mode.Dark, Style = new TooltipStyle { FontSize = "13px" } },
+            PlotOptions = new PlotOptions
+            {
+                Bar = new PlotOptionsBar
+                {
+                    Horizontal  = false,
+                    ColumnWidth = "60%",
+                    Colors      = new PlotOptionsBarColors
+                    {
+                        Ranges = new List<PlotOptionsBarColorRange>
+                        {
+                            new() { From = -999999, To = -0.000001, Color = "#f44336" },
+                            new() { From =  0,      To =  999999,   Color = "#00e676" }
+                        }
+                    }
+                }
+            }
         };
 
         _sessions = Db.GetRecentSessions(50);
@@ -362,28 +377,11 @@
         _advisorPage  = 1;
         _botEventPage = 1;
 
-        _tradesWithEth = BuildTradesWithRunningEth(_trades);
-        _ethCurve      = BuildEthCurve(_trades);
-
-        // Zoom Y-axis to the actual data range so small gains are visible
-        if (_ethCurve.Count >= 2)
-        {
-            var minQ  = (double)_ethCurve.Min(p => p.Quantity);
-            var maxQ  = (double)_ethCurve.Max(p => p.Quantity);
-            var range = maxQ - minQ;
-            var pad   = Math.Max(range * 0.2, 1e-6);
-            var ccy   = BaseCurrency;
-            _ethChartOptions.Yaxis = new List<YAxis>
-            {
-                new() {
-                    ForceNiceScale = false,
-                    Min = minQ - pad,
-                    Max = maxQ + pad,
-                    DecimalsInFloat = 5,
-                    Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
-                }
-            };
-        }
+        _tradesWithEth  = BuildTradesWithRunningEth(_trades);
+        _cyclePnlPoints = _cycles
+            .Where(c => !c.IsAbandoned)
+            .Select((c, i) => new CyclePnl($"C{i + 1}", c.NetEthGain))
+            .ToList();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -400,18 +398,6 @@
         return result;
     }
 
-    private static List<EthQuantityPoint> BuildEthCurve(List<Trade> trades)
-    {
-        var points = new List<EthQuantityPoint>(trades.Count);
-        decimal running = 0m;
-        foreach (var t in trades)
-        {
-            if (t.Note == "Shutdown close-out") continue;
-            running += t.Side == TradeSide.Buy ? t.Quantity : -t.Quantity;
-            points.Add(new EthQuantityPoint { Timestamp = t.Timestamp, Quantity = running });
-        }
-        return points;
-    }
 
     private static double SessionHours(SessionSummary s)
     {

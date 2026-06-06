@@ -186,11 +186,12 @@
             </MudItem>
         }
         <MudItem xs="6" sm="4" md="2">
-            <div style="background:#12121a;border:2px solid #00b4d8;border-radius:12px;padding:16px;text-align:center;box-shadow:0 0 18px rgba(0,180,216,0.35);">
-                <div style="font-size:2rem;font-weight:700;line-height:1.2;color:#00b4d8;letter-spacing:1px;">
+            @{ var priceColor = BotOpts.Value.ThemeColor ?? "#00b4d8"; }
+            <div style="background:#12121a;border:2px solid @priceColor;border-radius:12px;padding:16px;text-align:center;box-shadow:0 0 18px @(priceColor)55;">
+                <div style="font-size:2rem;font-weight:700;line-height:1.2;color:@priceColor;letter-spacing:1px;">
                     @(livePrice > 0m ? $"${livePrice:F2}" : "—")
                 </div>
-                <div style="font-size:0.72rem;color:#00b4d8;text-transform:uppercase;letter-spacing:1px;margin-top:4px;opacity:0.7;">
+                <div style="font-size:0.72rem;color:@priceColor;text-transform:uppercase;letter-spacing:1px;margin-top:4px;opacity:0.7;">
                     @BaseCurrency Price
                 </div>
             </div>
@@ -228,7 +229,7 @@
         </MudItem>
         <MudItem xs="12" md="4">
             <MudPaper Elevation="0" Class="pa-3" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
-                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">@BaseCurrency HELD</MudText>
+                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">SESSION GAIN (@BaseCurrency)</MudText>
                 @if (State.EthQuantityCurve.Count > 0)
                 {
                     <ApexChart TItem="EthQuantityPoint"
@@ -237,10 +238,10 @@
                                @key="State.ActiveSessionId">
                         <ApexPointSeries TItem="EthQuantityPoint"
                                          Items="State.EthQuantityCurve"
-                                         Name="@BaseCurrency"
+                                         Name="Gain"
                                          SeriesType="SeriesType.Area"
                                          XValue="@(e => e.Timestamp.ToLocalTime().ToString("dd MMM HH:mm"))"
-                                         YValue="@(e => (decimal)e.Quantity)" />
+                                         YValue="@(e => (decimal)(e.Quantity - State.StartingEth))" />
                     </ApexChart>
                 }
                 else
@@ -445,25 +446,28 @@
         var ccy   = BaseCurrency;
         var curve = State.EthQuantityCurve;
 
+        // Compute axis from gain values (Quantity - StartingEth), always anchored to 0
+        var startingEth = State.StartingEth;
         List<YAxis> yaxis;
         if (curve.Count > 0)
         {
-            var yMin = (double)curve.Min(p => p.Quantity);
-            var yMax = (double)curve.Max(p => p.Quantity);
-            var yPad = Math.Max((yMax - yMin) * 0.2, 0.00005);
+            var gainMin = (double)curve.Min(p => p.Quantity - startingEth);
+            var gainMax = (double)curve.Max(p => p.Quantity - startingEth);
+            var span    = Math.Max(Math.Abs(gainMax), Math.Abs(gainMin));
+            var yPad    = Math.Max(span * 0.2, 0.00005);
             yaxis = new List<YAxis> { new()
             {
                 ForceNiceScale = false,
-                Min    = yMin - yPad,
-                Max    = yMax + yPad,
-                Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
+                Min    = Math.Min(gainMin, 0) - yPad,
+                Max    = Math.Max(gainMax, 0) + yPad,
+                Labels = new YAxisLabels { Formatter = $"function(v){{ return (v>=0?'+':'')+v.toFixed(5)+' {ccy}'; }}" }
             }};
         }
         else
         {
             yaxis = new List<YAxis> { new()
             {
-                Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
+                Labels = new YAxisLabels { Formatter = $"function(v){{ return (v>=0?'+':'')+v.toFixed(5)+' {ccy}'; }}" }
             }};
         }
 
