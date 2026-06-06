@@ -19,6 +19,7 @@ public class DatabaseService : IDisposable
         _conn.Execute("PRAGMA synchronous=NORMAL;");
 
         CreateSchema();
+        MigrateSchema();
         MarkCrashedSessions();
     }
 
@@ -106,6 +107,14 @@ public class DatabaseService : IDisposable
         var sessionCols = _conn.Query("PRAGMA table_info(Sessions)").Select(r => (string)r.name);
         if (!sessionCols.Contains("StartingEth"))
             _conn.Execute("ALTER TABLE Sessions ADD COLUMN StartingEth REAL NOT NULL DEFAULT 0");
+    }
+
+    private void MigrateSchema()
+    {
+        var hasEthQty = _conn.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM pragma_table_info('EquityPoints') WHERE name='EthQty'");
+        if (hasEthQty == 0)
+            _conn.Execute("ALTER TABLE EquityPoints ADD COLUMN EthQty REAL");
     }
 
     private void MarkCrashedSessions()
@@ -219,11 +228,28 @@ public class DatabaseService : IDisposable
 
     // ── Equity points ─────────────────────────────────────────────────────────
 
-    public void InsertEquityPoint(string sessionId, DateTime timestamp, decimal equity)
+    public void InsertEquityPoint(string sessionId, DateTime timestamp, decimal equity, decimal ethQty)
     {
         _conn.Execute(
-            "INSERT INTO EquityPoints (SessionId,Timestamp,Equity) VALUES (@sid,@ts,@eq)",
-            new { sid = sessionId, ts = timestamp.ToString("o"), eq = (double)equity });
+            "INSERT INTO EquityPoints (SessionId,Timestamp,Equity,EthQty) VALUES (@sid,@ts,@eq,@qty)",
+            new { sid = sessionId, ts = timestamp.ToString("o"), eq = (double)equity, qty = (double)ethQty });
+    }
+
+    public List<EthQuantityPoint> GetSessionEthQtyCurve(string sessionId, int maxPoints = 600)
+    {
+        var all = _conn.Query<(string Ts, double? Qty)>(
+            "SELECT Timestamp, EthQty FROM EquityPoints WHERE SessionId=@id AND EthQty IS NOT NULL ORDER BY Timestamp",
+            new { id = sessionId }).ToList();
+
+        if (all.Count <= maxPoints)
+            return all.Select(r => new EthQuantityPoint
+                { Timestamp = DateTime.Parse(r.Ts, null, System.Globalization.DateTimeStyles.RoundtripKind), Quantity = (decimal)r.Qty!.Value }).ToList();
+
+        var step = all.Count / maxPoints;
+        return all.Where((_, i) => i % step == 0)
+                  .Select(r => new EthQuantityPoint
+                    { Timestamp = DateTime.Parse(r.Ts, null, System.Globalization.DateTimeStyles.RoundtripKind), Quantity = (decimal)r.Qty!.Value })
+                  .ToList();
     }
 
     public List<EquityPoint> GetSessionEquityCurve(string sessionId, int maxPoints = 500)

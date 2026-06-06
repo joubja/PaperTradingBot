@@ -743,9 +743,6 @@ public class LiveDemoRuntime : ITradingRuntime
             point,
             exposed: _portfolioStateStore.GetTotalMarketValue(_lastPriceBySymbol) > 0m);
 
-        if (!string.IsNullOrEmpty(_sessionId))
-            _db.InsertEquityPoint(_sessionId, timestampUtc, equity);
-
         var ethQty = _portfolioStateStore.GetPositionQuantity(_options.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT");
         var positions = _portfolioStateStore
             .GetPortfolioSnapshot().Positions
@@ -753,6 +750,9 @@ public class LiveDemoRuntime : ITradingRuntime
                 p => p.Key,
                 p => (p.Value.Quantity, p.Value.AverageEntryPrice),
                 StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrEmpty(_sessionId))
+            _db.InsertEquityPoint(_sessionId, timestampUtc, equity, ethQty);
 
         _botState.NotifyBarUpdate(point, ethQty, _portfolioStateStore.GetCash(), equity, positions);
     }

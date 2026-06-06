@@ -172,6 +172,12 @@ public class BotStateService
         OnStateChanged?.Invoke();
     }
 
+    public void SeedEthQuantityCurve(List<EthQuantityPoint> points)
+    {
+        lock (_lock) { EthQuantityCurve = new List<EthQuantityPoint>(points); }
+        OnStateChanged?.Invoke();
+    }
+
     public DateTime LastTradeAt { get; private set; } = DateTime.MinValue;
 
     public void NotifyTrade(Trade trade)

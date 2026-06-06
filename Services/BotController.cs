@@ -299,6 +299,10 @@ public class BotController
         foreach (var t in trades.TakeLast(20))
             _state.NotifyTrade(t);
         _state.NotifyCyclingUpdate(true, _db.GetRecentCompleteCycles(sessionId, limit: 20));
+
+        var ethQtyCurve = _db.GetSessionEthQtyCurve(sessionId);
+        if (ethQtyCurve.Count > 0)
+            _state.SeedEthQuantityCurve(ethQtyCurve);
     }
 
     private void LaunchRuntime(string sessionId, string strategyName, decimal startingEth, bool resumeMode)
