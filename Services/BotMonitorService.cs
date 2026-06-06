@@ -11,6 +11,7 @@ public class BotMonitorService : BackgroundService
     private readonly BotStateService     _state;
     private readonly DatabaseService     _db;
     private readonly NotificationOptions _opts;
+    private readonly BotOptions          _botOpts;
     private readonly ILogger<BotMonitorService> _logger;
 
     private bool     _noTradeAlertSent        = false;
@@ -18,18 +19,24 @@ public class BotMonitorService : BackgroundService
     private bool     _cyclingSuspendedAlert   = false;
     private DateOnly _lastDailySummary        = DateOnly.MinValue;
 
+    private string BotName     => _botOpts.Name ?? "Bot";
+    private string BaseCurrency => _botOpts.Symbols.FirstOrDefault()?.Symbol
+        .Replace("USDT", "").Replace("usdt", "") ?? "ETH";
+
     public BotMonitorService(
         NotificationService notify,
         BotStateService state,
         DatabaseService db,
         IOptions<NotificationOptions> opts,
+        IOptions<BotOptions> botOpts,
         ILogger<BotMonitorService> logger)
     {
-        _notify = notify;
-        _state  = state;
-        _db     = db;
-        _opts   = opts.Value;
-        _logger = logger;
+        _notify  = notify;
+        _state   = state;
+        _db      = db;
+        _opts    = opts.Value;
+        _botOpts = botOpts.Value;
+        _logger  = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -72,14 +79,15 @@ public class BotMonitorService : BackgroundService
             _stuckStateAlertSent = true;
             var ethQty = _state.Positions.TryGetValue(_state.PrimarySymbol, out var pos) ? pos.Quantity : 0m;
             _logger.LogCritical(
-                "STUCK_STATE | Phase=ActiveSell but Cash={Cash:F2} USDT — sell may not have applied to portfolio. ETH held={Eth:F5}",
-                cash, ethQty);
+                "STUCK_STATE | Phase=ActiveSell but Cash={Cash:F2} USDT — sell may not have applied to portfolio. {Ccy} held={Qty:F5}",
+                cash, BaseCurrency, ethQty);
             await _notify.SendAsync(
-                "CRITICAL: Bot stuck in ActiveSell with no cash",
+                $"[{BotName}] CRITICAL: Bot stuck in ActiveSell with no cash",
+                $"Bot:    {BotName}\n" +
                 $"Phase=ActiveSell but Cash={cash:F2} USDT.\n" +
                 $"The sell likely did not apply to the portfolio — manual intervention required.\n\n" +
-                $"ETH held:  {ethQty:F5}\n" +
-                $"Status:    {_state.StrategyStatus?.Summary ?? "unknown"}");
+                $"{BaseCurrency} held: {ethQty:F5}\n" +
+                $"Status:  {_state.StrategyStatus?.Summary ?? "unknown"}");
         }
         else if (phase != "ActiveSell")
         {
@@ -102,11 +110,12 @@ public class BotMonitorService : BackgroundService
             var ethQty = _state.Positions.TryGetValue(_state.PrimarySymbol, out var pos) ? pos.Quantity : 0m;
             _logger.LogWarning("MONITOR | Cycling suspended — sending alert");
             await _notify.SendAsync(
-                "Cycling suspended",
+                $"[{BotName}] Cycling suspended",
+                $"Bot:    {BotName}\n" +
                 $"The bot has suspended cycling after consecutive loss cycles.\n\n" +
-                $"ETH held: {ethQty:F5}\n" +
-                $"Phase:    {_state.StrategyStatus?.Phase}\n" +
-                $"Status:   {_state.StrategyStatus?.Summary}\n\n" +
+                $"{BaseCurrency} held: {ethQty:F5}\n" +
+                $"Phase:   {_state.StrategyStatus?.Phase}\n" +
+                $"Status:  {_state.StrategyStatus?.Summary}\n\n" +
                 $"Cycling will re-enable automatically based on RSI and elapsed time.");
         }
         else if (_state.CyclingEnabled)
@@ -150,16 +159,17 @@ public class BotMonitorService : BackgroundService
             var ethGain = ethQty - _state.StartingEth;
 
             var body =
+                $"Bot:          {BotName}\n" +
                 $"No trade for {silentFor.TotalHours:F0}h — bot may be stuck.\n\n" +
                 $"Phase:        {phase}\n" +
                 $"Status:       {summary}\n" +
-                $"ETH held:     {ethQty:F5}\n" +
-                $"Session gain: {(ethGain >= 0 ? "+" : "")}{ethGain:F5} ETH\n" +
+                $"{BaseCurrency} held:  {ethQty:F5}\n" +
+                $"Session gain: {(ethGain >= 0 ? "+" : "")}{ethGain:F5} {BaseCurrency}\n" +
                 $"Cycling:      {(_state.CyclingEnabled ? "ON" : "SUSPENDED")}\n" +
                 $"Last trade:   {lastTrade:yyyy-MM-dd HH:mm} UTC";
 
             _logger.LogWarning("MONITOR | No trade for {Hours:F0}h — sending alert", silentFor.TotalHours);
-            await _notify.SendAsync($"No trade for {silentFor.TotalHours:F0}h", body);
+            await _notify.SendAsync($"[{BotName}] No trade for {silentFor.TotalHours:F0}h", body);
         }
         else if (silentFor.TotalHours < _opts.NoTradeAlertHours)
         {
@@ -201,17 +211,18 @@ public class BotMonitorService : BackgroundService
             : $"{uptime.Minutes}m";
 
         var body =
+            $"Bot:          {BotName}\n" +
             $"Daily summary — {now:yyyy-MM-dd}\n\n" +
-            $"Bot:          {(_state.IsRunning ? $"Running ({uptimeTxt})" : "Stopped")}\n" +
+            $"Status:       {(_state.IsRunning ? $"Running ({uptimeTxt})" : "Stopped")}\n" +
             $"Strategy:     {_state.ActiveStrategy}\n" +
-            $"ETH held:     {ethQty:F5}\n" +
-            $"Session gain: {(ethGain >= 0 ? "+" : "")}{ethGain:F5} ETH ({(gainPct >= 0 ? "+" : "")}{gainPct:F2}%)\n" +
-            $"All-time:     {(allTime >= 0 ? "+" : "")}{allTime:F5} ETH\n" +
+            $"{BaseCurrency} held:  {ethQty:F5}\n" +
+            $"Session gain: {(ethGain >= 0 ? "+" : "")}{ethGain:F5} {BaseCurrency} ({(gainPct >= 0 ? "+" : "")}{gainPct:F2}%)\n" +
+            $"All-time:     {(allTime >= 0 ? "+" : "")}{allTime:F5} {BaseCurrency}\n" +
             $"Cycles:       {wins}/{totalCycles} won\n" +
             $"Cash (USDT):  ${cash:F2}\n" +
             $"Cycling:      {(_state.CyclingEnabled ? "ON" : "SUSPENDED")}";
 
         _logger.LogInformation("MONITOR | Sending daily summary");
-        await _notify.SendAsync($"Daily summary {now:yyyy-MM-dd}", body);
+        await _notify.SendAsync($"[{BotName}] Daily summary {now:yyyy-MM-dd}", body);
     }
 }
