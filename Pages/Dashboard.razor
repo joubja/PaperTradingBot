@@ -55,7 +55,7 @@
             <MudItem xs="12" sm="5" Class="d-flex align-center gap-3">
                 <MudChip T="string" Color="@(State.IsRunning ? Color.Success : Color.Default)"
                          Icon="@(State.IsRunning ? Icons.Material.Filled.Circle : Icons.Material.Outlined.Circle)">
-                    @(State.IsRunning ? $"Running · {State.ActiveStrategy}" : "Stopped")
+                    @(State.IsRunning ? $"Running · {FormatStrategyName(State.ActiveStrategy)}" : "Stopped")
                 </MudChip>
                 @if (State.IsRunning && _selectedStrategy == "BuildEthCycling")
                 {
@@ -488,6 +488,25 @@
                     await InvokeAsync(() => { _wallet = snap; StateHasChanged(); });
                 });
             _wasRunning = State.IsRunning;
+
+            // Keep Y-axis zoomed to actual data range — ForceNiceScale=false collapses to zero
+            // height when all points share the same value (early session), so we force a minimum pad.
+            var curve = State.EthQuantityCurve;
+            if (curve.Count > 0)
+            {
+                var yMin = (double)curve.Min(p => p.Quantity);
+                var yMax = (double)curve.Max(p => p.Quantity);
+                var yPad = Math.Max((yMax - yMin) * 0.2, 0.00005);
+                var ccy  = BaseCurrency;
+                _ethChartOptions.Yaxis = new List<YAxis> { new()
+                {
+                    ForceNiceScale = false,
+                    Min    = yMin - yPad,
+                    Max    = yMax + yPad,
+                    Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
+                }};
+            }
+
             StateHasChanged();
         });
     }
