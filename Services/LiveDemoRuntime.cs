@@ -242,11 +242,12 @@ public class LiveDemoRuntime : ITradingRuntime
             var seedEth = _sessionStartingEth > 0m ? _sessionStartingEth : _options.StartingQuantity;
             if (!_positionSeeded && seedEth > 0m)
             {
-                _portfolioStateStore.SeedPosition("ETHUSDT", seedEth, candle.Close);
+                var primarySym = _options.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT";
+                _portfolioStateStore.SeedPosition(primarySym, seedEth, candle.Close);
                 _positionSeeded = true;
                 _logger.LogInformation(
-                    "SEEDED | {Qty} ETH @ {Price:F4} (first bar close)",
-                    seedEth, candle.Close);
+                    "SEEDED | {Qty} {Symbol} @ {Price:F4} (first bar close)",
+                    seedEth, primarySym, candle.Close);
             }
             _sessionResultRecorder.RecordCandle(symbol, candle);
             _lastPriceBySymbol[symbol] = candle.Close;
@@ -745,7 +746,7 @@ public class LiveDemoRuntime : ITradingRuntime
         if (!string.IsNullOrEmpty(_sessionId))
             _db.InsertEquityPoint(_sessionId, timestampUtc, equity);
 
-        var ethQty = _portfolioStateStore.GetPositionQuantity("ETHUSDT");
+        var ethQty = _portfolioStateStore.GetPositionQuantity(_options.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT");
         var positions = _portfolioStateStore
             .GetPortfolioSnapshot().Positions
             .ToDictionary(

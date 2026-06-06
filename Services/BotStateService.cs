@@ -42,6 +42,7 @@ public class BotStateService
     public decimal SessionCommission { get; private set; }
     public decimal StartingEth { get; private set; }
     public DateTime SessionStartedAt { get; private set; } = DateTime.MinValue;
+    public string PrimarySymbol { get; private set; } = "ETHUSDT";
 
     // ── Cycling ───────────────────────────────────────────────────────────────
     public bool CyclingEnabled { get; private set; } = true;
@@ -63,13 +64,14 @@ public class BotStateService
 
     // ── Bot lifecycle ─────────────────────────────────────────────────────────
 
-    public void NotifyStarted(string strategy, string sessionId, decimal startingCash, decimal startingEth = 0m)
+    public void NotifyStarted(string strategy, string sessionId, decimal startingCash, decimal startingEth = 0m, string symbol = "ETHUSDT")
     {
         lock (_lock)
         {
             IsRunning           = true;
             ActiveStrategy      = strategy;
             ActiveSessionId     = sessionId;
+            PrimarySymbol       = symbol;
             _lastPhase          = "";
             _lastSummary        = "";
             _lastPhaseStartedAt = DateTime.UtcNow;
@@ -77,7 +79,7 @@ public class BotStateService
             Cash             = startingCash;
             TotalEquity      = startingCash;
             Positions        = startingEth > 0m
-                ? new() { ["ETHUSDT"] = (startingEth, 0m) }
+                ? new() { [symbol] = (startingEth, 0m) }
                 : new();
             EquityCurve      = Array.Empty<EquityPoint>();
             EthQuantityCurve = Array.Empty<EthQuantityPoint>();

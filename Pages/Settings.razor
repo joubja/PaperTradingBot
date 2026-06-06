@@ -4,8 +4,11 @@
 @inject OptimizerStateService     OptimizerState
 @inject StrategyBanditOptimizer   Bandit
 @inject ISnackbar                 Snackbar
+@inject IOptions<BotOptions>      BotOpts
 @implements IDisposable
 @using PaperTradingBot.AI
+@using PaperTradingBot.Config
+@using Microsoft.Extensions.Options
 @using Color = MudBlazor.Color
 @using Size  = MudBlazor.Size
 
@@ -144,7 +147,7 @@
                            Expanded="true">
             <TitleContent>
                 <div>
-                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">BuildEthCycling — RSI Thresholds</MudText>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">@($"Build{BaseCurrency}Cycling — RSI Thresholds")</MudText>
                     <MudText Typo="Typo.caption" Style="color:#666;">Controls when the strategy buys, sells, and cycles</MudText>
                 </div>
             </TitleContent>
@@ -218,7 +221,7 @@
                            Expanded="true">
             <TitleContent>
                 <div>
-                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">BuildEthCycling — Cycle Mechanics</MudText>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">@($"Build{BaseCurrency}Cycling — Cycle Mechanics")</MudText>
                     <MudText Typo="Typo.caption" Style="color:#666;">Adaptive sell fraction, abandon threshold, bounce confirmation</MudText>
                 </div>
             </TitleContent>
@@ -414,6 +417,9 @@
 </MudContainer>
 
 @code {
+    private string BaseCurrency => (BotOpts.Value.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT")
+                                       .Replace("USDT", "").Replace("usdt", "");
+
     private IReadOnlyList<BanditArmStatus> _banditStatus = [];
 
     protected override void OnInitialized()

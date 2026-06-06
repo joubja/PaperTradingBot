@@ -33,6 +33,8 @@ public class BotController
 
     private CancellationTokenSource? _cts;
     private Task?                    _botTask;
+
+    private string PrimarySymbol => _options.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT";
     private LiveDemoRuntime?         _activeRuntime;
     private readonly SemaphoreSlim   _guard = new(1, 1);
 
@@ -249,7 +251,7 @@ public class BotController
     {
         _portfolio.Reset(_options.StartingCash);
         if (startingEth > 0m)
-            _portfolio.SeedPosition("ETHUSDT", startingEth, 0m);
+            _portfolio.SeedPosition(PrimarySymbol, startingEth, 0m);
 
         var trades = _db.GetSessionTrades(sessionId);
         foreach (var trade in trades)
@@ -315,7 +317,7 @@ public class BotController
     {
         var recentCycles = _db.GetRecentCompletedCyclesAllSessions(30);
         _perf.Seed(recentCycles);
-        _state.NotifyStarted(strategyName, sessionId, _options.StartingCash, startingEth);
+        _state.NotifyStarted(strategyName, sessionId, _options.StartingCash, startingEth, PrimarySymbol);
         if (!resumeMode)
             _state.NotifyCyclingUpdate(true, _db.GetRecentCompleteCycles(sessionId, limit: 20));
         // [C-4-partial] Dispose previous CTS before replacing — prevents kernel handle leak across stop/start cycles.

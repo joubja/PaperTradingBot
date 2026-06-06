@@ -36,7 +36,7 @@ public sealed class AdvisorContextBuilder
         var now = DateTime.UtcNow;
 
         // ── 1. Session ETH performance ────────────────────────────────────────
-        var sessionEth   = _botState.Positions.TryGetValue("ETHUSDT", out var pos) ? pos.Quantity : 0m;
+        var sessionEth   = _botState.Positions.TryGetValue(_botState.PrimarySymbol, out var pos) ? pos.Quantity : 0m;
         var netEth       = sessionEth - _botState.StartingEth;
         var sessionHours = _botState.SessionStartedAt == DateTime.MinValue
             ? 0.0

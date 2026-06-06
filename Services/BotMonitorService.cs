@@ -70,7 +70,7 @@ public class BotMonitorService : BackgroundService
         if (phase == "ActiveSell" && cash < 1m && !_stuckStateAlertSent)
         {
             _stuckStateAlertSent = true;
-            var ethQty = _state.Positions.TryGetValue("ETHUSDT", out var pos) ? pos.Quantity : 0m;
+            var ethQty = _state.Positions.TryGetValue(_state.PrimarySymbol, out var pos) ? pos.Quantity : 0m;
             _logger.LogCritical(
                 "STUCK_STATE | Phase=ActiveSell but Cash={Cash:F2} USDT — sell may not have applied to portfolio. ETH held={Eth:F5}",
                 cash, ethQty);
@@ -99,7 +99,7 @@ public class BotMonitorService : BackgroundService
         if (!_state.CyclingEnabled && !_cyclingSuspendedAlert)
         {
             _cyclingSuspendedAlert = true;
-            var ethQty = _state.Positions.TryGetValue("ETHUSDT", out var pos) ? pos.Quantity : 0m;
+            var ethQty = _state.Positions.TryGetValue(_state.PrimarySymbol, out var pos) ? pos.Quantity : 0m;
             _logger.LogWarning("MONITOR | Cycling suspended — sending alert");
             await _notify.SendAsync(
                 "Cycling suspended",
@@ -146,7 +146,7 @@ public class BotMonitorService : BackgroundService
 
             var phase   = _state.StrategyStatus?.Phase   ?? "Unknown";
             var summary = _state.StrategyStatus?.Summary ?? "";
-            var ethQty  = _state.Positions.TryGetValue("ETHUSDT", out var p) ? p.Quantity : 0m;
+            var ethQty  = _state.Positions.TryGetValue(_state.PrimarySymbol, out var p) ? p.Quantity : 0m;
             var ethGain = ethQty - _state.StartingEth;
 
             var body =
@@ -183,7 +183,7 @@ public class BotMonitorService : BackgroundService
         _lastDailySummary = today;
 
         var sessionId = _state.ActiveSessionId;
-        var ethQty    = _state.Positions.TryGetValue("ETHUSDT", out var pos) ? pos.Quantity : 0m;
+        var ethQty    = _state.Positions.TryGetValue(_state.PrimarySymbol, out var pos) ? pos.Quantity : 0m;
         var ethGain   = ethQty - _state.StartingEth;
         var gainPct   = _state.StartingEth > 0m ? ethGain / _state.StartingEth * 100m : 0m;
         var cash      = _state.Cash;

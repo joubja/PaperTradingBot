@@ -24,8 +24,8 @@
                 <MudSelect T="string" @bind-Value="_selectedStrategy"
                            Label="Strategy" Variant="Variant.Outlined" Dense="true"
                            Disabled="@State.IsRunning">
-                    <MudSelectItem Value="@("BuildEthCycling")">BuildEth + Cycling (auto)</MudSelectItem>
-                    <MudSelectItem Value="@("BuildEth")">BuildEth (accumulate only)</MudSelectItem>
+                    <MudSelectItem Value="@("BuildEthCycling")">@($"Build{BaseCurrency} + Cycling (auto)")</MudSelectItem>
+                    <MudSelectItem Value="@("BuildEth")">@($"Build{BaseCurrency} (accumulate only)")</MudSelectItem>
                     <MudSelectItem Value="@("Technical")">Technical (EMA/RSI/MACD)</MudSelectItem>
                     <MudSelectItem Value="@("Demo")">Demo (3-bar pattern)</MudSelectItem>
                 </MudSelect>
@@ -239,7 +239,7 @@
                                          Items="State.EthQuantityCurve"
                                          Name="@BaseCurrency"
                                          SeriesType="SeriesType.Area"
-                                         XValue="@(e => e.Timestamp.ToLocalTime().ToString("HH:mm:ss"))"
+                                         XValue="@(e => e.Timestamp.ToLocalTime().ToString("dd MMM HH:mm"))"
                                          YValue="@(e => (decimal)e.Quantity)" />
                     </ApexChart>
                 }
@@ -372,6 +372,7 @@
 
     private string PrimarySymbol => BotOpts.Value.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT";
     private string BaseCurrency  => PrimarySymbol.Replace("USDT", "").Replace("usdt", "");
+    private string FormatStrategyName(string name) => name.Replace("Eth", BaseCurrency);
 
     private async Task CheckWallet()
     {
@@ -497,7 +498,7 @@
         try
         {
             await BotCtrl.ResumeOrStartAsync(_selectedStrategy);
-            Snackbar.Add($"Bot started with strategy: {_selectedStrategy}", Severity.Success);
+            Snackbar.Add($"Bot started with strategy: {FormatStrategyName(_selectedStrategy)}", Severity.Success);
         }
         catch (Exception ex)
         {

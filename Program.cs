@@ -163,7 +163,7 @@ app.MapGet("/health", (BotStateService state, LiveDemoRuntime runtime, BinanceLi
     var barStale  = !lastBar.HasValue   || lastBar.Value   > TimeSpan.FromMinutes(5);
     var status    = state.IsRunning && !barStale ? "healthy" : "degraded";
 
-    var ethQty  = state.Positions.TryGetValue("ETHUSDT", out var pos) ? pos.Quantity : 0m;
+    var ethQty  = state.Positions.TryGetValue(state.PrimarySymbol, out var pos) ? pos.Quantity : 0m;
     var ethGain = ethQty - state.StartingEth;
 
     var (totalCycles, wins) = state.ActiveSessionId is not null

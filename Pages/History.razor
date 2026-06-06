@@ -54,7 +54,7 @@
                                 <MudIcon Icon="@(isSelected ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowRight)"
                                          Size="Size.Small" Style="color:#666;" />
                             </td>
-                            <td><strong>@s.Strategy</strong></td>
+                            <td><strong>@FormatStrategyName(s.Strategy)</strong></td>
                             <td>@FormatDate(s.StartedAt)</td>
                             <td>@FormatDuration(s.StartedAt, s.StoppedAt)</td>
                             <td>
@@ -209,6 +209,8 @@
         <!-- AI Advisor history -->
         @if (_advisorRuns.Count > 0)
         {
+            var advisorPages = (int)Math.Ceiling(_advisorRuns.Count / (double)AdvisorPageSize);
+            var advisorSlice = _advisorRuns.Skip((_advisorPage - 1) * AdvisorPageSize).Take(AdvisorPageSize);
             <MudPaper Elevation="0" Class="pa-4 mt-4" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
                 <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">
                     AI ADVISOR HISTORY &nbsp;<MudChip T="string" Size="Size.Small">@_advisorRuns.Count</MudChip>
@@ -216,17 +218,17 @@
                 <MudSimpleTable Dense="true" Style="background:transparent;">
                     <thead>
                         <tr>
-                            <th>Time</th>
+                            <th>Date / Time</th>
                             <th>Trigger</th>
                             <th>Reasoning</th>
                             <th>Changes applied</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var r in _advisorRuns)
+                        @foreach (var r in advisorSlice)
                         {
                             <tr>
-                                <td style="white-space:nowrap;color:#888;font-size:0.75rem;">@r.Timestamp.ToLocalTime().ToString("MM-dd HH:mm")</td>
+                                <td style="white-space:nowrap;color:#888;font-size:0.75rem;">@r.Timestamp.ToLocalTime().ToString("dd MMM HH:mm")</td>
                                 <td style="white-space:nowrap;">
                                     <MudChip T="string" Size="Size.Small"
                                              Color="@(r.Trigger == "degradation" ? Color.Warning : r.Trigger == "regime-shift" ? Color.Error : Color.Default)">
@@ -241,12 +243,18 @@
                         }
                     </tbody>
                 </MudSimpleTable>
+                @if (advisorPages > 1)
+                {
+                    <MudPagination Count="advisorPages" @bind-Selected="_advisorPage" Size="Size.Small" Class="mt-2 d-flex justify-end" />
+                }
             </MudPaper>
         }
 
         <!-- Bot phase log -->
         @if (_botEvents.Count > 0)
         {
+            var activityPages = (int)Math.Ceiling(_botEvents.Count / (double)ActivityPageSize);
+            var activitySlice = _botEvents.Skip((_botEventPage - 1) * ActivityPageSize).Take(ActivityPageSize);
             <MudPaper Elevation="0" Class="pa-4 mt-4" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
                 <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">
                     BOT ACTIVITY LOG &nbsp;<MudChip T="string" Size="Size.Small">@_botEvents.Count</MudChip>
@@ -254,17 +262,17 @@
                 <MudSimpleTable Dense="true" Style="background:transparent;">
                     <thead>
                         <tr>
-                            <th>Time</th>
+                            <th>Date / Time</th>
                             <th>Phase</th>
                             <th>Description</th>
                             <th style="text-align:right;">Duration</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var e in _botEvents)
+                        @foreach (var e in activitySlice)
                         {
                             <tr>
-                                <td style="white-space:nowrap;color:#888;font-size:0.75rem;">@e.Timestamp.ToLocalTime().ToString("MM-dd HH:mm:ss")</td>
+                                <td style="white-space:nowrap;color:#888;font-size:0.75rem;">@e.Timestamp.ToLocalTime().ToString("dd MMM HH:mm:ss")</td>
                                 <td style="white-space:nowrap;">
                                     <MudChip T="string" Size="Size.Small"
                                              Color="@PhaseColor(e.Phase)">
@@ -277,6 +285,10 @@
                         }
                     </tbody>
                 </MudSimpleTable>
+                @if (activityPages > 1)
+                {
+                    <MudPagination Count="activityPages" @bind-Selected="_botEventPage" Size="Size.Small" Class="mt-2 d-flex justify-end" />
+                }
             </MudPaper>
         }
     }
@@ -295,12 +307,18 @@
     private List<AdvisorRun>                  _advisorRuns         = new();
     private List<BotEvent>                    _botEvents           = new();
 
+    private const int AdvisorPageSize  = 10;
+    private const int ActivityPageSize = 50;
+    private int _advisorPage   = 1;
+    private int _botEventPage  = 1;
+
     // ── Chart options ─────────────────────────────────────────────────────────
 
     private ApexChartOptions<EthQuantityPoint> _ethChartOptions = new();
 
     private string PrimarySymbol   => BotOpts.Value.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT";
     private string BaseCurrency    => PrimarySymbol.Replace("USDT", "").Replace("usdt", "");
+    private string FormatStrategyName(string name) => name.Replace("Eth", BaseCurrency);
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -336,14 +354,36 @@
 
     private void SelectSession(SessionSummary s)
     {
-        _selected    = s;
-        _trades      = Db.GetSessionTrades(s.Id);
-        _cycles      = Db.GetRecentCompleteCycles(s.Id, limit: 100);
-        _advisorRuns = Db.GetSessionAdvisorRuns(s.Id);
-        _botEvents   = Db.GetSessionBotEvents(s.Id);
+        _selected     = s;
+        _trades       = Db.GetSessionTrades(s.Id);
+        _cycles       = Db.GetRecentCompleteCycles(s.Id, limit: 100);
+        _advisorRuns  = Db.GetSessionAdvisorRuns(s.Id);
+        _botEvents    = Db.GetSessionBotEvents(s.Id);
+        _advisorPage  = 1;
+        _botEventPage = 1;
 
         _tradesWithEth = BuildTradesWithRunningEth(_trades);
         _ethCurve      = BuildEthCurve(_trades);
+
+        // Zoom Y-axis to the actual data range so small gains are visible
+        if (_ethCurve.Count >= 2)
+        {
+            var minQ  = (double)_ethCurve.Min(p => p.Quantity);
+            var maxQ  = (double)_ethCurve.Max(p => p.Quantity);
+            var range = maxQ - minQ;
+            var pad   = Math.Max(range * 0.2, 1e-6);
+            var ccy   = BaseCurrency;
+            _ethChartOptions.Yaxis = new List<YAxis>
+            {
+                new() {
+                    ForceNiceScale = false,
+                    Min = minQ - pad,
+                    Max = maxQ + pad,
+                    DecimalsInFloat = 5,
+                    Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
+                }
+            };
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

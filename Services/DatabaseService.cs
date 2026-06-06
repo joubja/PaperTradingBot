@@ -172,7 +172,7 @@ public class DatabaseService : IDisposable
                 SELECT SUM(CASE WHEN Side='Buy' THEN Quantity ELSE -Quantity END)
                        OVER (ORDER BY Timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running
                 FROM Trades
-                WHERE SessionId=@id AND Symbol='ETHUSDT'
+                WHERE SessionId=@id
             )
             """, new { id = sessionId });
         return result.HasValue ? (decimal)result.Value : 0m;
@@ -183,7 +183,7 @@ public class DatabaseService : IDisposable
         var result = _conn.ExecuteScalar<double?>("""
             SELECT SUM(CASE WHEN Side='Buy' THEN Quantity ELSE -Quantity END)
             FROM Trades
-            WHERE SessionId=@id AND Symbol='ETHUSDT' AND (Note IS NULL OR Note != 'Shutdown close-out')
+            WHERE SessionId=@id AND (Note IS NULL OR Note != 'Shutdown close-out')
             """, new { id = sessionId });
         return result.HasValue ? (decimal)result.Value : 0m;
     }
