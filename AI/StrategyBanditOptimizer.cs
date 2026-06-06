@@ -27,8 +27,8 @@ public sealed class StrategyBanditOptimizer : IHostedService
     // ── Candidate arms: 5 values per setting, centred on the default ──────────
     private static readonly decimal[] RsiDipBuyArms       = [33m, 37m, 40m, 43m, 47m];
     private static readonly decimal[] RsiCrossoverMaxArms = [52m, 56m, 60m, 64m, 68m];
-    private static readonly decimal[] RsiCycleSellArms    = [66m, 69m, 72m, 75m, 79m];
-    private static readonly decimal[] RsiCycleRebuyArms   = [37m, 41m, 45m, 49m, 53m];
+    private static readonly decimal[] RsiCycleSellArms    = [55m, 61m, 66m, 72m, 79m];
+    private static readonly decimal[] RsiCycleRebuyArms   = [37m, 42m, 47m, 52m, 57m];
     private static readonly decimal[] DefaultSellPctArms  = [0.28m, 0.34m, 0.40m, 0.46m, 0.52m];
     private static readonly decimal[] MinAbandonRiseArms  = [0.009m, 0.012m, 0.015m, 0.019m, 0.023m];
     private static readonly decimal[] MaxAbandonRiseArms  = [0.028m, 0.036m, 0.045m, 0.057m, 0.070m];
