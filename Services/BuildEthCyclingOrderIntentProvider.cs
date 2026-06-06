@@ -188,6 +188,8 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
             _cycleState[symbol] = csWarm;
         }
 
+        var baseCcy = symbol.Replace("USDT", "").Replace("usdt", "");
+
         if (history.Count < Warmup)
         {
             var secsLeft = (Warmup - history.Count) * 10;
@@ -204,7 +206,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 var wDip       = csWarm.SellPrice > 0m ? (csWarm.SellPrice - csWarm.TrailingLow) / csWarm.SellPrice : 0m;
 
                 _state.NotifyStrategyStatus(new("WarmingUp",
-                    $"Warming up ({history.Count}/{Warmup}, {timeLeft}) — cycle active | sold {csWarm.SellQty:F3} ETH @ ${csWarm.SellPrice:F2} | dip {wDip:P2}",
+                    $"Warming up ({history.Count}/{Warmup}, {timeLeft}) — cycle active | sold {csWarm.SellQty:F3} {baseCcy} @ ${csWarm.SellPrice:F2} | dip {wDip:P2}",
                     SellPrice:    csWarm.SellPrice,
                     SellQty:      csWarm.SellQty,
                     CurrentDropPct: wDip,
@@ -310,7 +312,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                         symbol, rebuyCash);
                     // Stay in ActiveSell — do NOT reset state, do NOT close DB row.
                     _state.NotifyStrategyStatus(new("ActiveSell",
-                        $"Waiting for rebuy (no cash!) — sold {cs.SellQty:F3} ETH @ ${cs.SellPrice:F2} | dip {dipDepth:P2}",
+                        $"Waiting for rebuy (no cash!) — sold {cs.SellQty:F3} {baseCcy} @ ${cs.SellPrice:F2} | dip {dipDepth:P2}",
                         SellPrice: cs.SellPrice, SellQty: cs.SellQty,
                         CurrentDropPct: dipDepth, MinDropPct: minDrop));
                     return OrderIntent.None($"Rebuy skipped — cash={rebuyCash:F2} USDT | {ctx}");
@@ -422,7 +424,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
             }
 
             _state.NotifyStrategyStatus(new("ActiveSell",
-                $"Waiting for rebuy — sold {cs.SellQty:F3} ETH @ ${cs.SellPrice:F2} | dip {dipDepth:P2} / bounce {bounceFromLow:P2}",
+                $"Waiting for rebuy — sold {cs.SellQty:F3} {baseCcy} @ ${cs.SellPrice:F2} | dip {dipDepth:P2} / bounce {bounceFromLow:P2}",
                 SellPrice:          cs.SellPrice,
                 SellQty:            cs.SellQty,
                 CurrentDropPct:     dipDepth,
@@ -512,7 +514,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     RecheckFeasibility(symbol, rsi);
 
                     _state.NotifyStrategyStatus(new("Watching",
-                        $"Recovery rebuy | sell was ${priorSellPrice:F2} buy={close:F2} dip={recoveryDip:P2} net={netGain:+0.00000;-0.00000} ETH",
+                        $"Recovery rebuy | sell was ${priorSellPrice:F2} buy={close:F2} dip={recoveryDip:P2} net={netGain:+0.00000;-0.00000} {baseCcy}",
                         AdaptiveSellPct: adaptiveSellPct, AdaptiveAbandonPct: adaptiveAbandon));
 
                     return new OrderIntent
@@ -623,7 +625,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                             var breakEvenForStatus = 2m * _options.TakerFeePercent / 100m;
                             var minDrop = Math.Max(breakEvenForStatus * 1.1m, 0.005m);
                             _state.NotifyStrategyStatus(new("ActiveSell",
-                                $"Cycle sold {sellQty:F3} ETH @ ${close:F2} ({adaptiveSellPct:P0}) — need {minDrop:P2} drop | abandon >{adaptiveAbandon:P1}",
+                                $"Cycle sold {sellQty:F3} {baseCcy} @ ${close:F2} ({adaptiveSellPct:P0}) — need {minDrop:P2} drop | abandon >{adaptiveAbandon:P1}",
                                 SellPrice:          close,
                                 SellQty:            sellQty,
                                 CurrentDropPct:     0m,
