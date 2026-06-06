@@ -214,7 +214,7 @@ public class BotMonitorService : BackgroundService
             $"Bot:          {BotName}\n" +
             $"Daily summary — {now:yyyy-MM-dd}\n\n" +
             $"Status:       {(_state.IsRunning ? $"Running ({uptimeTxt})" : "Stopped")}\n" +
-            $"Strategy:     {_state.ActiveStrategy}\n" +
+            $"Strategy:     {_state.ActiveStrategy.Replace("Eth", BaseCurrency)}\n" +
             $"{BaseCurrency} held:  {ethQty:F5}\n" +
             $"Session gain: {(ethGain >= 0 ? "+" : "")}{ethGain:F5} {BaseCurrency} ({(gainPct >= 0 ? "+" : "")}{gainPct:F2}%)\n" +
             $"All-time:     {(allTime >= 0 ? "+" : "")}{allTime:F5} {BaseCurrency}\n" +
