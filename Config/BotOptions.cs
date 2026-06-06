@@ -4,8 +4,11 @@ namespace PaperTradingBot.Config;
 
 public class BotOptions
 {
-    public decimal StartingCash { get; set; } = 10_000m;
-    public decimal StartingEth  { get; set; } = 0m;
+    public decimal StartingCash     { get; set; } = 10_000m;
+    public decimal StartingQuantity { get; set; } = 0m;
+    public string  Name             { get; set; } = "AETHER";
+    public string  Logo             { get; set; } = "eth";
+    public string  ThemeColor       { get; set; } = "#00b4d8";
     /// <summary>Taker fee as a percentage. 0.1 = 0.1% (Binance default).</summary>
     public decimal TakerFeePercent { get; set; } = 0.1m;
     public decimal SlippagePercent { get; set; } = 0.001m;

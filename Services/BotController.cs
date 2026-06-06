@@ -193,33 +193,34 @@ public class BotController
         var snapshot = await _wallet.GetBalancesAsync();
         decimal startingEth;
 
-        if (snapshot.Success && snapshot.EthFree > 0m)
+        if (snapshot.Success && snapshot.BaseFree > 0m)
         {
-            startingEth = snapshot.EthFree;
-            _logger.LogInformation("WALLET | Starting fresh with real balance: {Eth:F5} ETH", startingEth);
+            startingEth = snapshot.BaseFree;
+            _logger.LogInformation("WALLET | Starting fresh with real balance: {Qty:F5} {Currency}", startingEth, snapshot.BaseCurrency);
         }
-        else if (!_options.Runtime.LocalPaperExecutionOnly)
+        else if (!snapshot.Success && !_options.Runtime.LocalPaperExecutionOnly)
         {
-            // [WALLET-GUARD] For live/testnet execution (real orders hit the exchange), we cannot
-            // safely start without knowing the real balance. A config fallback risks trading with
-            // the wrong seed quantity — sells would target wrong amounts, causing rejected orders
-            // or dangerous over/under-sizing on a live exchange.
-            // HALT and require manual restart after the API recovers.
+            // [WALLET-GUARD] API unreachable — refuse to start for testnet/live bots.
+            // A config fallback risks trading with the wrong seed when the exchange is down.
+            // HALT and require manual restart after the Binance API recovers.
             _logger.LogCritical(
                 "WALLET | Balance check failed ({Error}) — LocalPaperExecutionOnly=false. " +
                 "REFUSING to start: real-order execution requires a confirmed balance. " +
                 "Restart the service once the Binance API is reachable.",
                 snapshot.Error ?? "unknown");
-            // Do not call StartCoreWithEth — bot stays stopped, requiring manual intervention.
             return;
         }
         else
         {
-            // Paper-only mode: all orders are locally simulated, so the config fallback is safe.
-            startingEth = _options.StartingEth;
+            // Either: paper-only mode, OR exchange is reachable but 0 balance in this currency
+            // (e.g. BTC bot on a testnet account that has no BTC). Fall back to config.
+            startingEth = _options.StartingQuantity;
+            var reason  = snapshot.Success
+                ? $"no {snapshot.BaseCurrency} balance in testnet wallet"
+                : $"balance check failed: {snapshot.Error ?? "unknown"}";
             _logger.LogWarning(
-                "WALLET | Balance check failed ({Error}) — using config fallback: {Eth:F5} ETH (paper-only mode)",
-                snapshot.Error ?? "unknown", startingEth);
+                "WALLET | Using config StartingQuantity={Qty:F5} {Currency} ({Reason})",
+                startingEth, snapshot.BaseCurrency, reason);
         }
 
         StartCoreWithEth(strategyName, startingEth);

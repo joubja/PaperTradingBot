@@ -14,14 +14,16 @@ namespace PaperTradingBot.Services;
 public sealed class BinanceAccountService
 {
     public sealed record WalletSnapshot(
-        decimal  EthFree,
+        decimal  BaseFree,
         decimal  UsdtFree,
         DateTime FetchedAt,
         bool     Success,
+        string   BaseCurrency = "ETH",
         string?  Error = null);
 
     private readonly IHttpClientFactory              _factory;
     private readonly BinanceOptions                  _options;
+    private readonly string                          _baseCurrency;
     private readonly ILogger<BinanceAccountService>  _logger;
 
     private WalletSnapshot? _cached;
@@ -36,6 +38,9 @@ public sealed class BinanceAccountService
         _factory = factory;
         _options = options.Value.Providers.Binance;
         _logger  = logger;
+
+        var primarySymbol = options.Value.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT";
+        _baseCurrency = primarySymbol.Replace("USDT", "").Replace("usdt", "").ToUpperInvariant();
     }
 
     public WalletSnapshot? Cached => _cached;
@@ -47,7 +52,7 @@ public sealed class BinanceAccountService
 
         if (string.IsNullOrWhiteSpace(_options.ApiKey) || string.IsNullOrWhiteSpace(_options.ApiSecret))
         {
-            _cached = new WalletSnapshot(0, 0, DateTime.UtcNow, false, "API key/secret not configured");
+            _cached = new WalletSnapshot(0, 0, DateTime.UtcNow, false, _baseCurrency, "API key/secret not configured");
             _lastFetch = DateTime.UtcNow;
             return _cached;
         }
@@ -69,7 +74,7 @@ public sealed class BinanceAccountService
             {
                 _logger.LogWarning("WALLET CHECK | HTTP {Status}: {Body}",
                     (int)resp.StatusCode, body[..Math.Min(300, body.Length)]);
-                _cached    = new WalletSnapshot(0, 0, DateTime.UtcNow, false, $"HTTP {(int)resp.StatusCode}");
+                _cached    = new WalletSnapshot(0, 0, DateTime.UtcNow, false, _baseCurrency, $"HTTP {(int)resp.StatusCode}");
                 _lastFetch = DateTime.UtcNow;
                 return _cached;
             }
@@ -77,23 +82,23 @@ public sealed class BinanceAccountService
             using var doc      = JsonDocument.Parse(body);
             var       balances = doc.RootElement.GetProperty("balances");
 
-            decimal ethFree = 0m, usdtFree = 0m;
+            decimal baseFree = 0m, usdtFree = 0m;
             foreach (var b in balances.EnumerateArray())
             {
                 var asset = b.GetProperty("asset").GetString();
-                if (asset == "ETH"  && decimal.TryParse(b.GetProperty("free").GetString(), out var e)) ethFree  = e;
-                if (asset == "USDT" && decimal.TryParse(b.GetProperty("free").GetString(), out var u)) usdtFree = u;
+                if (asset == _baseCurrency && decimal.TryParse(b.GetProperty("free").GetString(), out var e)) baseFree = e;
+                if (asset == "USDT"        && decimal.TryParse(b.GetProperty("free").GetString(), out var u)) usdtFree = u;
             }
 
-            _logger.LogInformation("WALLET CHECK | ETH={Eth:F5} USDT={Usdt:F2}", ethFree, usdtFree);
-            _cached    = new WalletSnapshot(ethFree, usdtFree, DateTime.UtcNow, true);
+            _logger.LogInformation("WALLET CHECK | {Currency}={Base:F5} USDT={Usdt:F2}", _baseCurrency, baseFree, usdtFree);
+            _cached    = new WalletSnapshot(baseFree, usdtFree, DateTime.UtcNow, true, _baseCurrency);
             _lastFetch = DateTime.UtcNow;
             return _cached;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "WALLET CHECK | Request failed");
-            _cached    = new WalletSnapshot(0, 0, DateTime.UtcNow, false, ex.Message[..Math.Min(100, ex.Message.Length)]);
+            _cached    = new WalletSnapshot(0, 0, DateTime.UtcNow, false, _baseCurrency, ex.Message[..Math.Min(100, ex.Message.Length)]);
             _lastFetch = DateTime.UtcNow;
             return _cached;
         }

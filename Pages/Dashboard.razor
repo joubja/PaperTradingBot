@@ -85,33 +85,33 @@
             }
             else
             {
-                var virtualEth  = State.Positions.TryGetValue("ETHUSDT", out var pos) ? pos.Quantity
+                var virtualEth  = State.Positions.TryGetValue(PrimarySymbol, out var pos) ? pos.Quantity
                                 : State.IsRunning ? State.StartingEth
                                 : 0m;
-                var drift       = _wallet.EthFree - virtualEth;
+                var drift       = _wallet.BaseFree - virtualEth;
                 var driftAbs    = Math.Abs(drift);
                 var matched     = driftAbs < 0.002m;
                 var driftColor  = matched ? "#00e676" : driftAbs < 0.01m ? "#ff9800" : "#f44336";
 
                 <span style="font-size:0.85rem;color:#ccc;">
-                    Real: <strong style="color:#00b4d8;">@_wallet.EthFree.ToString("F5") ETH</strong>
+                    Real: <strong style="color:#00b4d8;">@_wallet.BaseFree.ToString("F5") @_wallet.BaseCurrency</strong>
                     &nbsp;+&nbsp;<strong style="color:#9e9e9e;">$@_wallet.UsdtFree.ToString("F2") USDT</strong>
                 </span>
                 <span style="font-size:0.85rem;color:#888;">
-                    Virtual: <strong>@virtualEth.ToString("F5") ETH</strong>
+                    Virtual: <strong>@virtualEth.ToString("F5") @BaseCurrency</strong>
                 </span>
                 <MudChip T="string" Size="Size.Small"
                          Style="@($"color:{driftColor};border-color:{driftColor};")"
                          Variant="Variant.Outlined"
                          Icon="@(matched ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Warning)">
-                    @(matched ? "Matched" : $"Drift {(drift >= 0 ? "+" : "")}{drift:F5} ETH")
+                    @(matched ? "Matched" : $"Drift {(drift >= 0 ? "+" : "")}{drift:F5} {_wallet.BaseCurrency}")
                 </MudChip>
                 <span style="font-size:0.72rem;color:#444;">@_wallet.FetchedAt.ToLocalTime().ToString("HH:mm:ss")</span>
             }
         </div>
         <div class="d-flex gap-2">
             @if (_wallet is { Success: true } w && !State.IsRunning &&
-                 Math.Abs(w.EthFree - (State.Positions.TryGetValue("ETHUSDT", out var rp) ? rp.Quantity : State.IsRunning ? State.StartingEth : 0m)) >= 0.002m)
+                 Math.Abs(w.BaseFree - (State.Positions.TryGetValue(PrimarySymbol, out var rp) ? rp.Quantity : State.IsRunning ? State.StartingEth : 0m)) >= 0.002m)
             {
                 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
                            StartIcon="@Icons.Material.Filled.Sync"
@@ -191,7 +191,7 @@
                     @(livePrice > 0m ? $"${livePrice:F2}" : "—")
                 </div>
                 <div style="font-size:0.72rem;color:#00b4d8;text-transform:uppercase;letter-spacing:1px;margin-top:4px;opacity:0.7;">
-                    ETH Price
+                    @BaseCurrency Price
                 </div>
             </div>
         </MudItem>
@@ -201,7 +201,7 @@
     <MudGrid Class="mb-4">
         <MudItem xs="12" md="8">
             <MudPaper Elevation="0" Class="pa-3" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
-                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">ETH/USDT — 1m bars</MudText>
+                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">@PrimarySymbol — 10s bars</MudText>
                 @if (State.RecentCandles.Count > 1)
                 {
                     <ApexChart TItem="Candle"
@@ -210,7 +210,7 @@
                                @key="@($"candle-{State.ActiveSessionId}")">
                         <ApexCandleSeries TItem="Candle"
                                           Items="State.RecentCandles"
-                                          Name="ETH/USDT"
+                                          Name="@PrimarySymbol"
                                           XValue="@(c => c.Timestamp.ToLocalTime().ToString("HH:mm:ss"))"
                                           Open="@(c => c.Open)"
                                           High="@(c => c.High)"
@@ -228,7 +228,7 @@
         </MudItem>
         <MudItem xs="12" md="4">
             <MudPaper Elevation="0" Class="pa-3" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
-                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">ETH HELD</MudText>
+                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">@BaseCurrency HELD</MudText>
                 @if (State.EthQuantityCurve.Count > 0)
                 {
                     <ApexChart TItem="EthQuantityPoint"
@@ -237,7 +237,7 @@
                                @key="State.ActiveSessionId">
                         <ApexPointSeries TItem="EthQuantityPoint"
                                          Items="State.EthQuantityCurve"
-                                         Name="ETH"
+                                         Name="@BaseCurrency"
                                          SeriesType="SeriesType.Area"
                                          XValue="@(e => e.Timestamp.ToLocalTime().ToString("HH:mm:ss"))"
                                          YValue="@(e => (decimal)e.Quantity)" />
@@ -271,8 +271,8 @@
                         <th>Buy</th>
                         <th>Drop %</th>
                         <th>Duration</th>
-                        <th>ETH sold</th>
-                        <th>Net ETH</th>
+                        <th>@BaseCurrency sold</th>
+                        <th>Net @BaseCurrency</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -282,8 +282,8 @@
                         var dropPct  = !c.IsAbandoned && c.SellPrice > 0 ? (c.SellPrice - c.BuyPrice) / c.SellPrice * 100 : (decimal?)null;
                         var duration = !c.IsAbandoned ? FormatCycleDuration(c.SellTimestamp, c.BuyTimestamp) : "—";
                         <tr class="@rowClass">
-                            <td>@c.SellTimestamp.ToLocalTime().ToString("HH:mm:ss")</td>
-                            <td>@(c.IsAbandoned ? "—" : c.BuyTimestamp.ToLocalTime().ToString("HH:mm:ss"))</td>
+                            <td>@c.SellTimestamp.ToLocalTime().ToString("dd MMM HH:mm")</td>
+                            <td>@(c.IsAbandoned ? "—" : c.BuyTimestamp.ToLocalTime().ToString("dd MMM HH:mm"))</td>
                             <td class="@(dropPct > 0 ? "positive" : dropPct < 0 ? "negative" : "")">@(dropPct.HasValue ? $"{dropPct:F2}%" : "—")</td>
                             <td style="color:#888;">@duration</td>
                             <td>@c.SoldQuantity.ToString("F5")</td>
@@ -317,7 +317,7 @@
                     <MudSimpleTable Dense="true" Style="background:transparent;">
                         <thead>
                             <tr>
-                                <th>Time</th>
+                                <th>Date / Time</th>
                                 <th>Side</th>
                                 <th>Qty</th>
                                 <th>Price</th>
@@ -328,7 +328,7 @@
                             @foreach (var t in State.RecentTrades.Take(20))
                             {
                                 <tr>
-                                    <td>@t.Timestamp.ToLocalTime().ToString("HH:mm:ss")</td>
+                                    <td>@t.Timestamp.ToLocalTime().ToString("dd MMM HH:mm")</td>
                                     <td>
                                         <MudChip T="string" Size="Size.Small" Dense="true"
                                                  Color="@(t.Side == TradeSide.Buy ? Color.Success : Color.Error)">
@@ -370,6 +370,9 @@
     private bool  _walletChecking;
     private bool  _wasRunning;
 
+    private string PrimarySymbol => BotOpts.Value.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT";
+    private string BaseCurrency  => PrimarySymbol.Replace("USDT", "").Replace("usdt", "");
+
     private async Task CheckWallet()
     {
         _walletChecking = true;
@@ -383,15 +386,16 @@
     {
         if (_wallet is not { Success: true }) return;
 
-        var ethStr = _wallet?.EthFree.ToString("F5") ?? "unknown";
+        var baseStr = _wallet?.BaseFree.ToString("F5") ?? "unknown";
+        var ccy     = _wallet?.BaseCurrency ?? BaseCurrency;
         var msg = (MarkupString)(
             "<div style='color:#ff9800;font-weight:700;margin-bottom:10px;'>Resync and restart from real wallet?</div>" +
-            "<div style='margin-bottom:8px;'>Current wallet: <strong style='color:#00b4d8;'>" + ethStr + " ETH</strong></div>" +
+            "<div style='margin-bottom:8px;'>Current wallet: <strong style='color:#00b4d8;'>" + baseStr + " " + ccy + "</strong></div>" +
             "<ul style='color:#ccc;margin:0 0 12px 16px;line-height:1.8;'>" +
             "<li>Any open cycle will be <strong>force-rebuyed</strong> first</li>" +
             "<li>Current session <strong>archived</strong> — never auto-resumed</li>" +
             "<li>Fresh session starts immediately, seeded from real wallet balance</li>" +
-            "<li>ETH gain counter resets (all history preserved in DB)</li>" +
+            "<li>" + ccy + " gain counter resets (all history preserved in DB)</li>" +
             "</ul>");
 
         var confirmed = await Dialog.ShowMessageBox(
@@ -403,7 +407,7 @@
 
         try
         {
-            await BotCtrl.ArchiveAndRestartAsync(_selectedStrategy, _wallet?.EthFree);
+            await BotCtrl.ArchiveAndRestartAsync(_selectedStrategy, _wallet?.BaseFree);
             Snackbar.Add("Session archived — bot restarted from real wallet balance.", Severity.Success);
         }
         catch (Exception ex)
@@ -429,39 +433,40 @@
         Tooltip = new Tooltip { Theme = Mode.Dark, Style = new TooltipStyle { FontSize = "13px" } }
     };
 
-    private readonly ApexChartOptions<EthQuantityPoint> _ethChartOptions = new()
-    {
-        Chart = new Chart
-        {
-            Background = "transparent",
-            Toolbar    = new Toolbar { Show = false },
-            Animations = new Animations { Enabled = false }
-        },
-        Stroke = new Stroke { Curve = Curve.Smooth, Width = new List<double> { 2 } },
-        Fill   = new Fill   { Type = new List<FillType> { FillType.Gradient },
-                              Gradient = new FillGradient
-                              {
-                                  ShadeIntensity = 1,
-                                  OpacityFrom    = 0.45,
-                                  OpacityTo      = 0.05,
-                                  Stops          = new List<double> { 0, 100 }
-                              }},
-        Colors = new List<string> { "#00e676" },
-        Grid   = new Grid   { BorderColor = "#1e1e2e" },
-        Xaxis  = new XAxis  { Labels = new XAxisLabels { Show = false } },
-        Yaxis  = new List<YAxis> { new() { Labels = new YAxisLabels
-            { Formatter = "function(v){ return v.toFixed(5)+' ETH'; }" } } },
-        Tooltip = new Tooltip
-        {
-            Theme = Mode.Dark,
-            Style = new TooltipStyle { FontSize = "13px" }
-        }
-    };
+    private ApexChartOptions<EthQuantityPoint> _ethChartOptions = new();
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     protected override void OnInitialized()
     {
         State.OnStateChanged += HandleStateChange;
+
+        var ccy = BaseCurrency;
+        _ethChartOptions = new ApexChartOptions<EthQuantityPoint>
+        {
+            Chart = new Chart
+            {
+                Background = "transparent",
+                Toolbar    = new Toolbar { Show = false },
+                Animations = new Animations { Enabled = false }
+            },
+            Stroke = new Stroke { Curve = Curve.Smooth, Width = new List<double> { 2 } },
+            Fill   = new Fill   { Type = new List<FillType> { FillType.Gradient },
+                                  Gradient = new FillGradient
+                                  {
+                                      ShadeIntensity = 1,
+                                      OpacityFrom    = 0.45,
+                                      OpacityTo      = 0.05,
+                                      Stops          = new List<double> { 0, 100 }
+                                  }},
+            Colors = new List<string> { "#00e676" },
+            Grid   = new Grid   { BorderColor = "#1e1e2e" },
+            Xaxis  = new XAxis  { Labels = new XAxisLabels { Show = false } },
+            Yaxis  = new List<YAxis> { new() {
+                ForceNiceScale = false,
+                Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
+            } },
+            Tooltip = new Tooltip { Theme = Mode.Dark, Style = new TooltipStyle { FontSize = "13px" } }
+        };
     }
 
     public void Dispose()
@@ -502,12 +507,12 @@
 
     private async Task StopAndReset()
     {
-        var cashStr = State.Cash > 1m ? $" Currently holding ${State.Cash:F2} USDT — force-rebuyed to ETH first." : "";
+        var cashStr = State.Cash > 1m ? $" Currently holding ${State.Cash:F2} USDT — force-rebuyed to {BaseCurrency} first." : "";
         var msg = (MarkupString)(
             "<div style='color:#ff9800;font-weight:700;font-size:1rem;margin-bottom:12px;'>⚠️ This is a permanent reset — the session will be archived.</div>" +
             "<div style='margin-bottom:10px;'>What happens:" + cashStr + "</div>" +
             "<ul style='color:#ccc;margin:0 0 12px 16px;line-height:1.8;'>" +
-            "<li>Any open cycle will be <strong>force-rebuyed</strong> — all cash converted back to ETH first</li>" +
+            "<li>Any open cycle will be <strong>force-rebuyed</strong> — all cash converted back to " + BaseCurrency + " first</li>" +
             "<li>The current session will be <strong>archived</strong> and never auto-resumed</li>" +
             "<li>History will show this session as Archived</li>" +
             "<li>The bot will <strong>automatically restart</strong> fresh from your real wallet balance</li>" +
@@ -541,12 +546,12 @@
             var cashStr = State.Cash.ToString("F2");
             var msg = (MarkupString)(
                 "<div style='color:#f44336;font-weight:700;font-size:1rem;margin-bottom:12px;'>The bot has an active sell cycle in progress.</div>" +
-                "<div style='margin-bottom:10px;'>Currently holding <strong style='color:#ff9800;'>$" + cashStr + " USDT</strong> — waiting to rebuy ETH at a dip.</div>" +
+                "<div style='margin-bottom:10px;'>Currently holding <strong style='color:#ff9800;'>$" + cashStr + " USDT</strong> — waiting to rebuy " + BaseCurrency + " at a dip.</div>" +
                 "<div style='color:#ccc;margin-bottom:6px;'>Stopping now means:</div>" +
                 "<ul style='color:#ff9800;margin:0 0 12px 16px;line-height:1.8;'>" +
-                "<li>The cash will NOT be automatically converted back to ETH</li>" +
+                "<li>The cash will NOT be automatically converted back to " + BaseCurrency + "</li>" +
                 "<li>The rebuy at the intended dip price will be missed</li>" +
-                "<li>The ETH gain from this cycle is lost until you restart</li>" +
+                "<li>The " + BaseCurrency + " gain from this cycle is lost until you restart</li>" +
                 "</ul>" +
                 "<div style='color:#00e676;font-size:0.88rem;'>&#x2713; Restarting the bot will automatically resume this cycle.</div>");
 
@@ -608,10 +613,11 @@
 
     private List<Metric> GetMetrics()
     {
-        var hasPos  = State.Positions.TryGetValue("ETHUSDT", out var pos);
+        var hasPos  = State.Positions.TryGetValue(PrimarySymbol, out var pos);
         var ethQty  = hasPos ? pos.Quantity : 0m;
         var ethGain = ethQty - State.StartingEth;
         var ethGainPct = State.StartingEth > 0m ? ethGain / State.StartingEth * 100m : 0m;
+        var ccy = BaseCurrency;
 
         var sessionHours = State.IsRunning && State.SessionStartedAt != DateTime.MinValue
             ? (decimal)(DateTime.UtcNow - State.SessionStartedAt).TotalHours
@@ -637,19 +643,19 @@
 
         var metrics = new List<Metric>
         {
-            new("ETH Held",   $"{ethQty:F5}",                                                                         "neutral"),
-            new("ETH Gain",   $"{(ethGain >= 0 ? "+" : "")}{ethGain:F5} ({(ethGainPct >= 0 ? "+" : "")}{ethGainPct:F2}%)", ethGain >= 0 ? "positive" : "negative"),
-            new("ETH/hour",   ethPerHour != 0m ? $"{(ethPerHour >= 0 ? "+" : "")}{ethPerHour:F6}" : "—",             ethPerHour >= 0 ? "positive" : "negative"),
-            new("Win Rate",   winRateTxt,                                                                              "neutral"),
-            new("Last Cycle", lastCycleTxt,                                                                            "neutral"),
-            new("Uptime",     uptimeTxt,                                                                               "neutral"),
+            new($"{ccy} Held",   $"{ethQty:F5}",                                                                         "neutral"),
+            new($"{ccy} Gain",   $"{(ethGain >= 0 ? "+" : "")}{ethGain:F5} ({(ethGainPct >= 0 ? "+" : "")}{ethGainPct:F2}%)", ethGain >= 0 ? "positive" : "negative"),
+            new($"{ccy}/hr",     ethPerHour != 0m ? $"{(ethPerHour >= 0 ? "+" : "")}{ethPerHour:F6}" : "—",             ethPerHour >= 0 ? "positive" : "negative"),
+            new("Win Rate",      winRateTxt,                                                                              "neutral"),
+            new("Last Cycle",    lastCycleTxt,                                                                            "neutral"),
+            new("Uptime",        uptimeTxt,                                                                               "neutral"),
         };
 
         if (State.Cash > 20m)
             metrics.Insert(0, new("Cash (rebuy)", $"${State.Cash:F2}", "positive"));
 
         var allTimeGain = Db.GetTotalCycleEthGainAllSessions();
-        metrics.Add(new("All-time ETH", $"{(allTimeGain >= 0 ? "+" : "")}{allTimeGain:F5}", allTimeGain >= 0 ? "positive" : "negative"));
+        metrics.Add(new($"All-time {ccy}", $"{(allTimeGain >= 0 ? "+" : "")}{allTimeGain:F5}", allTimeGain >= 0 ? "positive" : "negative"));
 
         return metrics;
     }

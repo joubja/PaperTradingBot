@@ -1,7 +1,10 @@
 @page "/history"
 @inject DatabaseService Db
+@inject IOptions<BotOptions> BotOpts
 @using Color = MudBlazor.Color
 @using Size  = MudBlazor.Size
+@using Microsoft.Extensions.Options
+@using PaperTradingBot.Config
 
 <PageTitle>Session History</PageTitle>
 
@@ -25,10 +28,10 @@
                         <th>Started</th>
                         <th>Duration</th>
                         <th>Status</th>
-                        <th style="text-align:right;">Start ETH</th>
-                        <th style="text-align:right;">Final ETH</th>
-                        <th style="text-align:right;">ETH Gain</th>
-                        <th style="text-align:right;">ETH/hour</th>
+                        <th style="text-align:right;">Start @BaseCurrency</th>
+                        <th style="text-align:right;">Final @BaseCurrency</th>
+                        <th style="text-align:right;">@BaseCurrency Gain</th>
+                        <th style="text-align:right;">@BaseCurrency/hr</th>
                         <th style="text-align:right;">Cycles</th>
                     </tr>
                 </thead>
@@ -86,13 +89,13 @@
         <MudGrid Class="mb-4">
             <MudItem xs="12">
                 <MudPaper Elevation="0" Class="pa-3" Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
-                    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">ETH ACCUMULATED</MudText>
+                    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#9e9e9e;">@BaseCurrency ACCUMULATED</MudText>
                     @if (_ethCurve.Count > 0)
                     {
                         <ApexChart TItem="EthQuantityPoint" Options="_ethChartOptions" Height="260" @key="@($"eth-{_selected?.Id}")">
                             <ApexPointSeries TItem="EthQuantityPoint"
                                              Items="_ethCurve"
-                                             Name="ETH"
+                                             Name="@BaseCurrency"
                                              SeriesType="SeriesType.Area"
                                              XValue="@(e => e.Timestamp.ToLocalTime().ToString("HH:mm:ss"))"
                                              YValue="@(e => (decimal)e.Quantity)" />
@@ -124,12 +127,12 @@
                         <MudSimpleTable Dense="true" Style="background:transparent;">
                             <thead>
                                 <tr>
-                                    <th>Time</th>
+                                    <th>Date / Time</th>
                                     <th>Symbol</th>
                                     <th>Side</th>
                                     <th style="text-align:right;">Qty</th>
                                     <th style="text-align:right;">Price</th>
-                                    <th style="text-align:right;">ETH held after</th>
+                                    <th style="text-align:right;">@BaseCurrency held after</th>
                                     <th>Note</th>
                                 </tr>
                             </thead>
@@ -137,7 +140,7 @@
                                 @foreach (var (t, runningEth) in _tradesWithEth)
                                 {
                                     <tr>
-                                        <td>@t.Timestamp.ToLocalTime().ToString("HH:mm:ss")</td>
+                                        <td>@t.Timestamp.ToLocalTime().ToString("dd MMM HH:mm")</td>
                                         <td><strong>@t.Symbol</strong></td>
                                         <td>
                                             <MudChip T="string" Size="Size.Small"
@@ -176,7 +179,7 @@
                                     <th>Buy</th>
                                     <th style="text-align:right;">Drop%</th>
                                     <th style="text-align:right;">Duration</th>
-                                    <th style="text-align:right;">Net ETH</th>
+                                    <th style="text-align:right;">Net @BaseCurrency</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -186,8 +189,8 @@
                                     var drop     = !c.IsAbandoned && c.SellPrice > 0 ? (c.SellPrice - c.BuyPrice) / c.SellPrice * 100 : (decimal?)null;
                                     var duration = !c.IsAbandoned ? FormatCycleDuration(c.SellTimestamp, c.BuyTimestamp) : "—";
                                     <tr class="@rowClass">
-                                        <td>@c.SellTimestamp.ToLocalTime().ToString("HH:mm")</td>
-                                        <td>@(c.IsAbandoned ? "—" : c.BuyTimestamp.ToLocalTime().ToString("HH:mm"))</td>
+                                        <td>@c.SellTimestamp.ToLocalTime().ToString("dd MMM HH:mm")</td>
+                                        <td>@(c.IsAbandoned ? "—" : c.BuyTimestamp.ToLocalTime().ToString("dd MMM HH:mm"))</td>
                                         <td style="text-align:right;" class="@(drop > 0 ? "positive" : drop < 0 ? "negative" : "")">
                                             @(drop.HasValue ? $"{drop:F2}%" : "—")
                                         </td>
@@ -294,26 +297,32 @@
 
     // ── Chart options ─────────────────────────────────────────────────────────
 
-    private readonly ApexChartOptions<EthQuantityPoint> _ethChartOptions = new()
-    {
-        Chart   = new Chart  { Background = "transparent", Toolbar = new Toolbar { Show = false }, Animations = new Animations { Enabled = false } },
-        Stroke  = new Stroke { Curve = Curve.Smooth, Width = new List<double> { 2 } },
-        Fill    = new Fill   { Type = new List<FillType> { FillType.Gradient },
-                               Gradient = new FillGradient { ShadeIntensity = 1, OpacityFrom = 0.40, OpacityTo = 0.05, Stops = new List<double> { 0, 100 } } },
-        Colors  = new List<string> { "#00e676" },
-        Grid    = new Grid   { BorderColor = "#1e1e2e" },
-        Xaxis   = new XAxis  { Labels = new XAxisLabels { Show = false } },
-        Yaxis   = new List<YAxis>
-        {
-            new() { DecimalsInFloat = 5, Labels = new YAxisLabels { Formatter = "function(v){ return v.toFixed(5)+' ETH'; }" } }
-        },
-        Tooltip = new Tooltip { Theme = Mode.Dark, Style = new TooltipStyle { FontSize = "13px" } }
-    };
+    private ApexChartOptions<EthQuantityPoint> _ethChartOptions = new();
+
+    private string PrimarySymbol   => BotOpts.Value.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT";
+    private string BaseCurrency    => PrimarySymbol.Replace("USDT", "").Replace("usdt", "");
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     protected override void OnInitialized()
     {
+        var baseCcy = BaseCurrency;
+        _ethChartOptions = new ApexChartOptions<EthQuantityPoint>
+        {
+            Chart   = new Chart  { Background = "transparent", Toolbar = new Toolbar { Show = false }, Animations = new Animations { Enabled = false } },
+            Stroke  = new Stroke { Curve = Curve.Smooth, Width = new List<double> { 2 } },
+            Fill    = new Fill   { Type = new List<FillType> { FillType.Gradient },
+                                   Gradient = new FillGradient { ShadeIntensity = 1, OpacityFrom = 0.40, OpacityTo = 0.05, Stops = new List<double> { 0, 100 } } },
+            Colors  = new List<string> { "#00e676" },
+            Grid    = new Grid   { BorderColor = "#1e1e2e" },
+            Xaxis   = new XAxis  { Labels = new XAxisLabels { Show = false } },
+            Yaxis   = new List<YAxis>
+            {
+                new() { ForceNiceScale = false, DecimalsInFloat = 5, Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {baseCcy}'; }}" } }
+            },
+            Tooltip = new Tooltip { Theme = Mode.Dark, Style = new TooltipStyle { FontSize = "13px" } }
+        };
+
         _sessions = Db.GetRecentSessions(50);
         foreach (var s in _sessions)
         {

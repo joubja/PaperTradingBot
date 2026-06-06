@@ -239,7 +239,7 @@ public class LiveDemoRuntime : ITradingRuntime
 
             // Seed starting ETH position at real market price on first bar so avgEntry is correct.
             // Use the session-specific starting ETH (from wallet) if set, otherwise fall back to config.
-            var seedEth = _sessionStartingEth > 0m ? _sessionStartingEth : _options.StartingEth;
+            var seedEth = _sessionStartingEth > 0m ? _sessionStartingEth : _options.StartingQuantity;
             if (!_positionSeeded && seedEth > 0m)
             {
                 _portfolioStateStore.SeedPosition("ETHUSDT", seedEth, candle.Close);

@@ -694,8 +694,11 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
             }
         }
 
-        var accumStep = GetSymbolConfig(symbol)?.QuantityStep ?? 0.001m;
-        var hasSufficientCash = _portfolio.GetCash() >= accumStep * close * (1m + _options.TakerFeePercent / 100m);
+        var accumSymbolConfig = GetSymbolConfig(symbol);
+        var accumStep = accumSymbolConfig?.QuantityStep ?? 0.001m;
+        var accumMinNotional = accumSymbolConfig?.MinNotional ?? 0m;
+        var hasSufficientCash = _portfolio.GetCash() >= accumStep * close * (1m + _options.TakerFeePercent / 100m)
+                             && (accumMinNotional <= 0m || _portfolio.GetCash() >= accumMinNotional);
 
         // Guard: hold cash for recovery rebuy while in post-abandon watch mode
         if (hasSufficientCash && rsi < rsiDipBuy && cs.PostAbandonSellPrice == 0m)
