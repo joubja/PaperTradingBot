@@ -232,7 +232,7 @@
                 @if (State.EthQuantityCurve.Count > 0)
                 {
                     <ApexChart TItem="EthQuantityPoint"
-                               Options="_ethChartOptions"
+                               Options="BuildEthChartOptions()"
                                Height="260"
                                @key="State.ActiveSessionId">
                         <ApexPointSeries TItem="EthQuantityPoint"
@@ -434,15 +434,40 @@
         Tooltip = new Tooltip { Theme = Mode.Dark, Style = new TooltipStyle { FontSize = "13px" } }
     };
 
-    private ApexChartOptions<EthQuantityPoint> _ethChartOptions = new();
-
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     protected override void OnInitialized()
     {
         State.OnStateChanged += HandleStateChange;
+    }
 
-        var ccy = BaseCurrency;
-        _ethChartOptions = new ApexChartOptions<EthQuantityPoint>
+    private ApexChartOptions<EthQuantityPoint> BuildEthChartOptions()
+    {
+        var ccy   = BaseCurrency;
+        var curve = State.EthQuantityCurve;
+
+        List<YAxis> yaxis;
+        if (curve.Count > 0)
+        {
+            var yMin = (double)curve.Min(p => p.Quantity);
+            var yMax = (double)curve.Max(p => p.Quantity);
+            var yPad = Math.Max((yMax - yMin) * 0.2, 0.00005);
+            yaxis = new List<YAxis> { new()
+            {
+                ForceNiceScale = false,
+                Min    = yMin - yPad,
+                Max    = yMax + yPad,
+                Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
+            }};
+        }
+        else
+        {
+            yaxis = new List<YAxis> { new()
+            {
+                Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
+            }};
+        }
+
+        return new ApexChartOptions<EthQuantityPoint>
         {
             Chart = new Chart
             {
@@ -462,10 +487,7 @@
             Colors = new List<string> { "#00e676" },
             Grid   = new Grid   { BorderColor = "#1e1e2e" },
             Xaxis  = new XAxis  { Labels = new XAxisLabels { Show = false } },
-            Yaxis  = new List<YAxis> { new() {
-                ForceNiceScale = false,
-                Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
-            } },
+            Yaxis  = yaxis,
             Tooltip = new Tooltip { Theme = Mode.Dark, Style = new TooltipStyle { FontSize = "13px" } }
         };
     }
@@ -488,25 +510,6 @@
                     await InvokeAsync(() => { _wallet = snap; StateHasChanged(); });
                 });
             _wasRunning = State.IsRunning;
-
-            // Keep Y-axis zoomed to actual data range — ForceNiceScale=false collapses to zero
-            // height when all points share the same value (early session), so we force a minimum pad.
-            var curve = State.EthQuantityCurve;
-            if (curve.Count > 0)
-            {
-                var yMin = (double)curve.Min(p => p.Quantity);
-                var yMax = (double)curve.Max(p => p.Quantity);
-                var yPad = Math.Max((yMax - yMin) * 0.2, 0.00005);
-                var ccy  = BaseCurrency;
-                _ethChartOptions.Yaxis = new List<YAxis> { new()
-                {
-                    ForceNiceScale = false,
-                    Min    = yMin - yPad,
-                    Max    = yMax + yPad,
-                    Labels = new YAxisLabels { Formatter = $"function(v){{ return v.toFixed(5)+' {ccy}'; }}" }
-                }};
-            }
-
             StateHasChanged();
         });
     }
