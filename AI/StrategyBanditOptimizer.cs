@@ -46,6 +46,13 @@ public sealed class StrategyBanditOptimizer : IHostedService
     private SettingBandit[] AllBandits =>
         [_dipBuy, _crossMax, _cycleSell, _cycleRebuy, _sellPct, _minAbandon, _maxAbandon, _cooldown];
 
+    // Drought recovery: if no cycle completes for DroughtHours, force arm step-down so
+    // the bandit can't permanently deadlock on a threshold the market never reaches.
+    private const double DroughtHours        = 4.0;
+    private const double DroughtCheckMinutes = 30.0;
+    private DateTime _lastCycleCompletedAt = DateTime.MinValue;
+    private Timer?   _droughtTimer;
+
     private readonly LiveSettingsService   _settings;
     private readonly BotStateService       _botState;
     private readonly PerformanceTracker    _perf;
@@ -96,11 +103,17 @@ public sealed class StrategyBanditOptimizer : IHostedService
         _botState.OnCycleCompleted += HandleCycleCompleted;
         _accumTracker.OnFeedback   += HandleAccumulationFeedback;
 
+        _droughtTimer = new Timer(
+            _ => CheckCycleStall(),
+            null,
+            TimeSpan.FromMinutes(DroughtCheckMinutes),
+            TimeSpan.FromMinutes(DroughtCheckMinutes));
+
         _logger.LogInformation(
-            "BANDIT | Started. State {S}. Settings {L}. ExplorationC={C}",
+            "BANDIT | Started. State {S}. Settings {L}. ExplorationC={C}. DroughtTimeout={D}h",
             stateLoaded    ? $"loaded from {_options.BanditPersistPath}"   : "fresh",
             settingsLoaded ? $"loaded from {_options.SettingsPersistPath}" : "defaults",
-            _options.ExplorationC);
+            _options.ExplorationC, DroughtHours);
 
         return Task.CompletedTask;
     }
@@ -109,6 +122,7 @@ public sealed class StrategyBanditOptimizer : IHostedService
     {
         _botState.OnCycleCompleted -= HandleCycleCompleted;
         _accumTracker.OnFeedback   -= HandleAccumulationFeedback;
+        _droughtTimer?.Dispose();
         if (_options.Enabled) TrySaveState();
         return Task.CompletedTask;
     }
@@ -128,6 +142,9 @@ public sealed class StrategyBanditOptimizer : IHostedService
     private void HandleCycleCompleted(CycleCompletedEvent e)
     {
         if (!_options.Enabled) return;
+
+        if (!e.IsAbandoned)
+            _lastCycleCompletedAt = DateTime.UtcNow;
 
         // Only settings causally linked to cycle outcome get cycle reward
         _cycleSell.RecordReward(e.Reward);
@@ -255,6 +272,40 @@ public sealed class StrategyBanditOptimizer : IHostedService
             _optimizerState.RecordBanditAdjustment($"[accum:{e.Trigger}] {changesStr}", e.Reward, _perf.RollingReward());
             _settings.Save();
         }
+    }
+
+    // ── Drought recovery ─────────────────────────────────────────────────────
+    // If the bandit locks onto a sell threshold the market never reaches, cycles
+    // stop firing and UCB1 has no feedback to act on — a permanent deadlock.
+    // This timer fires every 30 min and applies a zero reward + re-select when the
+    // drought exceeds DroughtHours, nudging the bandit toward a lower sell threshold.
+    private void CheckCycleStall()
+    {
+        if (!_options.Enabled || _optimizerState.IsPaused) return;
+        if (_botState.StrategyStatus?.Phase == "ActiveSell") return; // mid-cycle, not stalled
+
+        var reference = _lastCycleCompletedAt != DateTime.MinValue
+            ? _lastCycleCompletedAt
+            : _botState.SessionStartedAt;
+
+        if (reference == DateTime.MinValue) return;
+
+        var drought = DateTime.UtcNow - reference;
+        if (drought.TotalHours < DroughtHours) return;
+
+        var prevArm = _cycleSell.ActiveArm;
+        var prevVal = _cycleSell.CurrentValue;
+
+        _cycleSell.RecordReward(0f);
+        _cycleRebuy.RecordReward(0f);
+        _cycleSell.SelectNext();
+        _cycleRebuy.SelectNext();
+        ApplyAll(0f);
+        TrySaveState();
+
+        _logger.LogWarning(
+            "BANDIT | Drought {H:F1}h — sell arm stepped: {PrevArm}={PrevVal} → arm {NewArm}={NewVal}",
+            drought.TotalHours, prevArm, prevVal, _cycleSell.ActiveArm, _cycleSell.CurrentValue);
     }
 
     // ── Persistence ───────────────────────────────────────────────────────────
