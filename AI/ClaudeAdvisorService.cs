@@ -36,6 +36,7 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
     private readonly DatabaseService        _db;
     private readonly ClaudeAdvisorOptions   _options;
     private readonly OptimizerOptions       _optimizerOptions;
+    private readonly BotOptions             _botOptions;
     private readonly ILogger<ClaudeAdvisorService> _logger;
 
     private Timer?           _timer;
@@ -48,35 +49,40 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
     private const int     IntMaxDelta = 3;
     private const int     DebounceMins = 5;
 
-    private const string SystemPrompt = """
-        You are an ETH accumulation optimizer for an automated ETH/USDT trading bot.
+    private string BuildSystemPrompt()
+    {
+        var ccy   = _botOptions.Symbols.FirstOrDefault()?.Symbol
+                        .Replace("USDT", "").Replace("usdt", "") ?? "ETH";
+        var pair  = $"{ccy}/USDT";
+        return $$"""
+        You are a {{ccy}} accumulation optimizer for an automated {{pair}} trading bot.
 
-        PRIMARY GOAL: Maximize ETH accumulated per hour (ETH/hr). Every decision must be
-        evaluated by asking "does this setting change lead to more ETH at the end of the day?"
-        Never optimize for USD profit. ETH gain is the only metric that matters.
+        PRIMARY GOAL: Maximize {{ccy}} accumulated per hour ({{ccy}}/hr). Every decision must be
+        evaluated by asking "does this setting change lead to more {{ccy}} at the end of the day?"
+        Never optimize for USD profit. {{ccy}} gain is the only metric that matters.
 
-        HOW THE BOT ACCUMULATES ETH — TWO MECHANISMS:
+        HOW THE BOT ACCUMULATES {{ccy}} — TWO MECHANISMS:
 
         1. BASE ACCUMULATION (passive, runs continuously)
-           Buys ETH with available cash whenever:
+           Buys {{ccy}} with available cash whenever:
            - RSI drops below RsiDipBuy (RSI dip signal)
            - OR a bullish EMA crossover occurs AND RSI < RsiCrossoverMax (EMA cross signal)
-           These buys grow the ETH position steadily. Profitable when price rises after buy.
+           These buys grow the {{ccy}} position steadily. Profitable when price rises after buy.
 
         2. CYCLING OVERLAY (active, periodic)
            When RSI spikes above RsiCycleSell AND is declining:
-           - SELLS a fraction of ETH (DefaultSellPct) for USDT cash
+           - SELLS a fraction of {{ccy}} (DefaultSellPct) for USDT cash
            - Waits for price to DROP into the MinAbandonRise–MaxAbandonRise band
-           - REBUYS all cash for ETH → net MORE ETH than was sold (profit from the spread)
-           - If price RISES instead, the cycle is ABANDONED: no trade, no ETH change
-           A completed cycle = ETH gain. An abandoned cycle = neutral (opportunity cost only).
+           - REBUYS all cash for {{ccy}} → net MORE {{ccy}} than was sold (profit from the spread)
+           - If price RISES instead, the cycle is ABANDONED: no trade, no {{ccy}} change
+           A completed cycle = {{ccy}} gain. An abandoned cycle = neutral (opportunity cost only).
 
         WHAT EACH SETTING CONTROLS:
         - RsiDipBuy: RSI threshold for dip accumulation buys. Lower = stricter entries, fewer buys.
         - RsiCrossoverMax: RSI ceiling for EMA cross buys. Lower = avoids buying into overheated price.
         - RsiCycleSell: RSI level that triggers the sell. Higher = fewer cycles, requires stronger spike.
         - RsiCycleRebuy: RSI level that forces rebuy even without full dip. Lower = more patient waiting.
-        - DefaultSellPct: fraction of ETH sold per cycle. Higher = more ETH at stake per cycle.
+        - DefaultSellPct: fraction of {{ccy}} sold per cycle. Higher = more {{ccy}} at stake per cycle.
         - MinAbandonRise: price rise needed before cycle is abandoned. Lower = bails out earlier.
         - MaxAbandonRise: maximum rise before forced rebuy. Higher = more patient, waits for bigger dip.
         - CycleCooldownBars: bars between cycles. More = fewer cycles, avoids rapid churning.
@@ -86,12 +92,12 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
         - Cycling abandon rate HIGH → widen abandon band (MaxAbandonRise up) or lower RsiCycleRebuy
         - RSI dip buy win rate LOW → lower RsiDipBuy (stricter entry, avoid buying into further decline)
         - EMA cross win rate LOW → lower RsiCrossoverMax (avoid buying into already-overbought price)
-        - ETH/hr is positive and growing → do NOT change things; stability is valuable
-        - ETH/hr near zero or negative → identify which mechanism is broken and adjust that one
+        - {{ccy}}/hr is positive and growing → do NOT change things; stability is valuable
+        - {{ccy}}/hr near zero or negative → identify which mechanism is broken and adjust that one
 
         Respond with ONLY a valid JSON object — no preamble, no markdown, just the JSON:
         {
-          "reasoning": "2-3 sentences: which mechanism is underperforming, what you're changing, and why it should improve ETH/hr",
+          "reasoning": "2-3 sentences: which mechanism is underperforming, what you're changing, and why it should improve {{ccy}}/hr",
           "adjustments": {
             "RsiDipBuy": <decimal or null>,
             "RsiCrossoverMax": <decimal or null>,
@@ -106,12 +112,13 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
 
         Rules:
         - Omit or null any field you do not want to change.
-        - If ETH/hr is positive and performance looks acceptable, recommend no changes (all nulls).
+        - If {{ccy}}/hr is positive and performance looks acceptable, recommend no changes (all nulls).
         - Keep changes small: RSI values ±3, fractions ±0.05, cooldown ±3.
         - RsiCycleSell must remain > RsiCrossoverMax + 5.
         - RsiDipBuy must remain < RsiCycleSell - 15.
         - MaxAbandonRise must remain > MinAbandonRise + 0.01.
         """;
+    }
 
     public ClaudeAdvisorService(
         ClaudeApiClient client,
@@ -124,6 +131,7 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
         DatabaseService db,
         IOptions<ClaudeAdvisorOptions> options,
         IOptions<OptimizerOptions> optimizerOptions,
+        IOptions<BotOptions> botOptions,
         ILogger<ClaudeAdvisorService> logger)
     {
         _client           = client;
@@ -136,6 +144,7 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
         _db               = db;
         _options          = options.Value;
         _optimizerOptions = optimizerOptions.Value;
+        _botOptions       = botOptions.Value;
         _logger           = logger;
     }
 
@@ -214,7 +223,7 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
         _logger.LogInformation("CLAUDE ADVISOR | [{Trigger}] Calling API ...", trigger);
 
         var result = await _client.SendAsync(
-            _options.ApiKey, _options.Model, SystemPrompt,
+            _options.ApiKey, _options.Model, BuildSystemPrompt(),
             BuildPrompt(trigger), _options.MaxTokens,
             CancellationToken.None);
 
