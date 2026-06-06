@@ -192,39 +192,27 @@ public class BotController
 
     private async Task StartCoreAsync(string strategyName)
     {
-        var snapshot = await _wallet.GetBalancesAsync();
-        decimal startingEth;
-
-        if (snapshot.Success && snapshot.BaseFree > 0m)
+        // [WALLET-GUARD] Verify API connectivity for non-paper bots; refuse to start if unreachable.
+        // We do NOT seed from wallet balance: testnet accounts hold arbitrary free funds that
+        // don't represent real capital. StartingQuantity in config is the single source of truth.
+        if (!_options.Runtime.LocalPaperExecutionOnly)
         {
-            startingEth = snapshot.BaseFree;
-            _logger.LogInformation("WALLET | Starting fresh with real balance: {Qty:F5} {Currency}", startingEth, snapshot.BaseCurrency);
-        }
-        else if (!snapshot.Success && !_options.Runtime.LocalPaperExecutionOnly)
-        {
-            // [WALLET-GUARD] API unreachable — refuse to start for testnet/live bots.
-            // A config fallback risks trading with the wrong seed when the exchange is down.
-            // HALT and require manual restart after the Binance API recovers.
-            _logger.LogCritical(
-                "WALLET | Balance check failed ({Error}) — LocalPaperExecutionOnly=false. " +
-                "REFUSING to start: real-order execution requires a confirmed balance. " +
-                "Restart the service once the Binance API is reachable.",
-                snapshot.Error ?? "unknown");
-            return;
-        }
-        else
-        {
-            // Either: paper-only mode, OR exchange is reachable but 0 balance in this currency
-            // (e.g. BTC bot on a testnet account that has no BTC). Fall back to config.
-            startingEth = _options.StartingQuantity;
-            var reason  = snapshot.Success
-                ? $"no {snapshot.BaseCurrency} balance in testnet wallet"
-                : $"balance check failed: {snapshot.Error ?? "unknown"}";
-            _logger.LogWarning(
-                "WALLET | Using config StartingQuantity={Qty:F5} {Currency} ({Reason})",
-                startingEth, snapshot.BaseCurrency, reason);
+            var snapshot = await _wallet.GetBalancesAsync();
+            if (!snapshot.Success)
+            {
+                _logger.LogCritical(
+                    "WALLET | Balance check failed ({Error}) — LocalPaperExecutionOnly=false. " +
+                    "REFUSING to start: real-order execution requires a reachable exchange API. " +
+                    "Restart the service once the Binance API is reachable.",
+                    snapshot.Error ?? "unknown");
+                return;
+            }
+            _logger.LogInformation("WALLET | API reachable ({Currency}={Base:F5} USDT={Usdt:F2})",
+                snapshot.BaseCurrency, snapshot.BaseFree, snapshot.UsdtFree);
         }
 
+        var startingEth = _options.StartingQuantity;
+        _logger.LogInformation("WALLET | Starting fresh with config quantity: {Qty:F5}", startingEth);
         StartCoreWithEth(strategyName, startingEth);
     }
 
