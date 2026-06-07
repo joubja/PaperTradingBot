@@ -244,10 +244,16 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
 
     // ── Parse and apply ───────────────────────────────────────────────────────
 
-    private static readonly Regex JsonBlockRx = new(@"\{[\s\S]*\}", RegexOptions.Compiled);
+    private static readonly Regex JsonBlockRx    = new(@"\{[\s\S]*\}", RegexOptions.Compiled);
+    private static readonly Regex MarkdownFenceRx = new(@"```(?:json)?\s*([\s\S]*?)\s*```", RegexOptions.Compiled);
 
     private void ParseAndApply(string response, string trigger)
     {
+        // Strip markdown code fences if Claude ignores the "no markdown" instruction
+        var fenceMatch = MarkdownFenceRx.Match(response);
+        if (fenceMatch.Success)
+            response = fenceMatch.Groups[1].Value;
+
         var match = JsonBlockRx.Match(response);
         if (!match.Success)
         {
