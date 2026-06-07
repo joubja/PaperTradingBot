@@ -308,7 +308,7 @@ public class BotController
     private void LaunchRuntime(string sessionId, string strategyName, decimal startingEth, bool resumeMode)
     {
         var recentCycles = _db.GetRecentCompletedCyclesAllSessions(30);
-        _perf.Seed(recentCycles);
+        _perf.Seed(recentCycles, _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m);
         _state.NotifyStarted(strategyName, sessionId, _options.StartingCash, startingEth, PrimarySymbol);
         if (!resumeMode)
             _state.NotifyCyclingUpdate(true, _db.GetRecentCompleteCycles(sessionId, limit: 20));

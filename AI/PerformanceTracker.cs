@@ -15,21 +15,27 @@ public sealed record AccumulationOutcome(
 /// </summary>
 public sealed class CycleCompletedEvent
 {
-    public string   Symbol         { get; init; } = "";
-    public bool     IsAbandoned    { get; init; }
-    public decimal  NetEthGain     { get; init; }
-    public decimal  SellPrice      { get; init; }
-    public decimal  BuyPrice       { get; init; }
-    public float[]  FeaturesAtSell { get; init; } = [];
-    public DateTime SellTimestamp  { get; init; }
-    public DateTime CompletedAt    { get; init; }
+    public string   Symbol          { get; init; } = "";
+    public bool     IsAbandoned     { get; init; }
+    public decimal  NetEthGain      { get; init; }
+    public decimal  SellPrice       { get; init; }
+    public decimal  BuyPrice        { get; init; }
+    public float[]  FeaturesAtSell  { get; init; } = [];
+    public DateTime SellTimestamp   { get; init; }
+    public DateTime CompletedAt     { get; init; }
+    /// <summary>Starting coin quantity for this bot (e.g. 1.0 ETH, 0.0103 BTC).
+    /// Used to normalise the reward so the tanh scale works identically for any coin.</summary>
+    public decimal  StartingQuantity { get; init; } = 1.0m;
 
     /// <summary>
     /// Reward in [-1, 1] for bandit/NN training.
+    /// Normalised by StartingQuantity so that a 0.3% coin gain always maps to the same reward
+    /// regardless of whether the bot holds 1 ETH or 0.01 BTC.
     /// Settled abandons carry real negative NetEthGain and produce negative reward.
-    /// Immediate abandon events (NetEthGain=0) produce 0 — the real cost is recognised at settle time.
+    /// Immediate abandon stubs (NetEthGain=0) produce 0 — real cost is recognised at settle time.
     /// </summary>
-    public float Reward => (float)Math.Tanh((double)NetEthGain * 150.0);
+    public float Reward => (float)Math.Tanh(
+        (double)NetEthGain * 150.0 / Math.Max((double)StartingQuantity, 1e-9));
 }
 
 /// <summary>
@@ -97,7 +103,7 @@ public sealed class PerformanceTracker
     /// Feature vectors are not stored in the DB, so FeaturesAtSell is left empty —
     /// that only affects drift detection, not the reward/degradation logic.
     /// </summary>
-    public void Seed(IEnumerable<Services.CycleResult> cycles)
+    public void Seed(IEnumerable<Services.CycleResult> cycles, decimal startingQuantity = 1.0m)
     {
         lock (_lock)
         {
@@ -106,14 +112,15 @@ public sealed class PerformanceTracker
             {
                 _history.Add(new CycleCompletedEvent
                 {
-                    Symbol         = c.Symbol,
-                    IsAbandoned    = c.IsAbandoned,
-                    NetEthGain     = c.NetEthGain,
-                    SellPrice      = c.SellPrice,
-                    BuyPrice       = c.BuyPrice,
-                    FeaturesAtSell = [],
-                    SellTimestamp  = c.SellTimestamp,
-                    CompletedAt    = c.BuyTimestamp,
+                    Symbol           = c.Symbol,
+                    IsAbandoned      = c.IsAbandoned,
+                    NetEthGain       = c.NetEthGain,
+                    SellPrice        = c.SellPrice,
+                    BuyPrice         = c.BuyPrice,
+                    FeaturesAtSell   = [],
+                    SellTimestamp    = c.SellTimestamp,
+                    CompletedAt      = c.BuyTimestamp,
+                    StartingQuantity = startingQuantity,
                 });
             }
         }
