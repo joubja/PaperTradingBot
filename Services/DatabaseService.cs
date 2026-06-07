@@ -358,9 +358,10 @@ public class DatabaseService : IDisposable
     /// abandoned USDT is eventually rebuyed as part of a subsequent cycle.
     /// NetEthGain will be negative (price rose), making the loss visible in the cycle table.
     /// </summary>
-    public void UpdateAbandonedCycleRebuy(int cycleId, decimal boughtQty, decimal buyPrice, decimal netGain)
+    /// <returns>Number of rows updated (0 = cycle not found or not abandoned — caller should warn).</returns>
+    public int UpdateAbandonedCycleRebuy(int cycleId, decimal boughtQty, decimal buyPrice, decimal netGain)
     {
-        _conn.Execute("""
+        return _conn.Execute("""
             UPDATE CyclingCycles
             SET BuyTimestamp=@ts, BoughtQuantity=@qty, BuyPrice=@price, NetEthGain=@gain
             WHERE Id=@id AND IsAbandoned=1

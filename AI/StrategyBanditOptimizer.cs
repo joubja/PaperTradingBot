@@ -159,7 +159,10 @@ public sealed class StrategyBanditOptimizer : IHostedService
         }
         // _dipBuy, _crossMax: causal reward only from accumulation feedback
 
-        if (_botState.StrategyStatus?.Phase == "ActiveSell") { TrySaveState(); return; }
+        // Note: no Phase=="ActiveSell" guard here — a cycle-completed event fires at rebuy time
+        // when the phase is still "ActiveSell" (order pending). We DO want arm selection now
+        // so the next sell uses updated settings. The ActiveSell guard lives in the accumulation
+        // handler where mid-cycle setting changes would be unsafe.
 
         if (_optimizerState.IsPaused)
         {
@@ -180,11 +183,9 @@ public sealed class StrategyBanditOptimizer : IHostedService
         ApplyAll(e.Reward);
         TrySaveState();
 
-        if (_dipBuy.TotalPulls % 5 == 0 && _dipBuy.TotalPulls > 0)
-            _logger.LogInformation(
-                "BANDIT | Arm snapshot after {N} pulls: RsiDipBuy={D}  RsiCycleSell={S}  SellPct={P}  Cooldown={C}",
-                _dipBuy.TotalPulls, _dipBuy.Describe(), _cycleSell.Describe(),
-                _sellPct.Describe(), _cooldown.Describe());
+        _logger.LogInformation(
+            "BANDIT | Reward={R:+0.000;-0.000} pulls={P} | RsiCycleSell={S}  SellPct={Pct}  Cooldown={C}",
+            e.Reward, _cycleSell.TotalPulls, _cycleSell.Describe(), _sellPct.Describe(), _cooldown.Describe());
     }
 
     // ── Accumulation feedback ─────────────────────────────────────────────────

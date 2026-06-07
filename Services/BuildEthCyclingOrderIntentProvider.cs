@@ -357,7 +357,11 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     var abandonNetGain  = abandonRebuyQty - cs.PostAbandonInheritedSellQty;
 
                     if (cs.PostAbandonCycleId.HasValue && _state.ActiveSessionId is not null)
-                        _db.UpdateAbandonedCycleRebuy(cs.PostAbandonCycleId.Value, abandonRebuyQty, close, abandonNetGain);
+                    {
+                        var rows = _db.UpdateAbandonedCycleRebuy(cs.PostAbandonCycleId.Value, abandonRebuyQty, close, abandonNetGain);
+                        if (rows == 0)
+                            _logger.LogWarning("ABANDON SETTLE | {Symbol} cycleId={Id} not found or not abandoned — P&L lost", symbol, cs.PostAbandonCycleId.Value);
+                    }
 
                     if (cs.PostAbandonInheritedFeatures.Length > 0)
                         _state.NotifyCycleCompleted(new CycleCompletedEvent
@@ -515,7 +519,11 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 var expNetGain     = expRebuyQty - cs.PostAbandonSellQty;
 
                 if (cs.PostAbandonCycleId.HasValue && _state.ActiveSessionId is not null)
-                    _db.UpdateAbandonedCycleRebuy(cs.PostAbandonCycleId.Value, expRebuyQty, close, expNetGain);
+                {
+                    var rows = _db.UpdateAbandonedCycleRebuy(cs.PostAbandonCycleId.Value, expRebuyQty, close, expNetGain);
+                    if (rows == 0)
+                        _logger.LogWarning("ABANDON SETTLE (EXPIRED) | {Symbol} cycleId={Id} not found — P&L lost", symbol, cs.PostAbandonCycleId.Value);
+                }
 
                 if (cs.PostAbandonSellFeatures.Length > 0)
                     _state.NotifyCycleCompleted(new CycleCompletedEvent
@@ -593,12 +601,13 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                         priorSellQty, priorSellPrice, priorSellTs,
                         rcvQty, close);
 
-                    // Notify bandit — recovery rebuys are real cycle outcomes and must influence arm selection
+                    // Notify bandit — recovery rebuys are settled abandons; IsAbandoned=true so the
+                    // circuit breaker and advisor see the real abandon outcome, not a clean win.
                     if (priorFeaturesSaved.Length > 0)
                         _state.NotifyCycleCompleted(new CycleCompletedEvent
                         {
                             Symbol           = symbol,
-                            IsAbandoned      = false,
+                            IsAbandoned      = true,
                             NetEthGain       = netGain,
                             SellPrice        = priorSellPrice,
                             BuyPrice         = close,

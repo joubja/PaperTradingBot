@@ -35,51 +35,66 @@ public sealed class AdvisorContextBuilder
         var s   = _settings;
         var now = DateTime.UtcNow;
 
-        // ── 1. Session ETH performance ────────────────────────────────────────
+        // ── 1. Session coin performance ───────────────────────────────────────
         var sessionEth   = _botState.Positions.TryGetValue(_botState.PrimarySymbol, out var pos) ? pos.Quantity : 0m;
-        var netEth       = sessionEth - _botState.StartingEth;
+        var startingEth  = _botState.StartingEth;
+        var netEth       = sessionEth - startingEth;
+        var gainPct      = startingEth > 0m ? (double)netEth / (double)startingEth * 100.0 : 0.0;
         var sessionHours = _botState.SessionStartedAt == DateTime.MinValue
             ? 0.0
             : (now - _botState.SessionStartedAt).TotalHours;
         var ethPerHour = sessionHours > 0.05 ? (double)netEth / sessionHours : 0.0;
 
-        sb.AppendLine("## Session ETH Performance");
-        sb.AppendLine($"Runtime:      {(sessionHours > 0.05 ? $"{sessionHours:F1}h" : "< 3 min")}");
-        sb.AppendLine($"ETH position: {sessionEth:F4}  (started: {_botState.StartingEth:F4})");
-        sb.AppendLine($"Net ETH:      {netEth:+0.0000;-0.0000}  ({ethPerHour:+0.0000;-0.0000} ETH/hr)");
-        sb.AppendLine($"Cash:         ${_botState.Cash:F2}");
+        var ccy = _botState.PrimarySymbol.Replace("USDT", "").Replace("usdt", "");
+        sb.AppendLine($"## Session {ccy} Performance");
+        sb.AppendLine($"Runtime:          {(sessionHours > 0.05 ? $"{sessionHours:F1}h" : "< 3 min")}");
+        sb.AppendLine($"{ccy} position:   {sessionEth:F5}  (started: {startingEth:F5})");
+        sb.AppendLine($"Net {ccy}:        {netEth:+0.00000;-0.00000}  ({gainPct:+0.000;-0.000}%  |  {ethPerHour:+0.00000;-0.00000} {ccy}/hr)");
+        sb.AppendLine($"Cash:             ${_botState.Cash:F2}");
+
+        // Current market state from strategy status summary (contains price, RSI, phase detail)
+        var statusSummary = _botState.StrategyStatus?.Summary;
+        if (!string.IsNullOrWhiteSpace(statusSummary))
+            sb.AppendLine($"Market state:     {statusSummary}");
         sb.AppendLine();
 
         // ── 2. Cycling mechanism ──────────────────────────────────────────────
         var cycles    = _perf.GetRecent(20);
+        // Settled abandons (NetEthGain != 0) are real coin losses — include them in all stats.
+        // Unsettled abandon stubs (NetEthGain == 0, still in recovery watch) are excluded.
+        var settled   = cycles.Where(c => !c.IsAbandoned || c.NetEthGain != 0m).ToList();
         var completed = cycles.Where(c => !c.IsAbandoned).ToList();
         var abandoned = cycles.Where(c => c.IsAbandoned).ToList();
-        var winners   = completed.Where(c => c.NetEthGain > 0).ToList();
+        var settledAbandons = abandoned.Where(c => c.NetEthGain != 0m).ToList();
+        var winners   = settled.Where(c => c.NetEthGain > 0).ToList();
 
-        sb.AppendLine($"## Cycling Mechanism (last {cycles.Count} cycles)");
+        sb.AppendLine($"## Cycling Mechanism (last {cycles.Count} events)");
         if (cycles.Count == 0)
         {
             sb.AppendLine("No cycles recorded yet.");
         }
         else
         {
-            var totalCyclingEth  = completed.Sum(c => c.NetEthGain);
-            var avgEthPerCycle   = completed.Count > 0 ? completed.Average(c => (double)c.NetEthGain) : 0.0;
-            var winRate          = completed.Count > 0 ? (double)winners.Count / completed.Count : 0.0;
-            var abandonRate      = cycles.Count > 0 ? (double)abandoned.Count / cycles.Count : 0.0;
+            var totalCyclingEth = settled.Sum(c => c.NetEthGain);
+            var avgEthPerCycle  = settled.Count > 0 ? settled.Average(c => (double)c.NetEthGain) : 0.0;
+            var winRate         = settled.Count > 0 ? (double)winners.Count / settled.Count : 0.0;
+            var abandonRate     = cycles.Count > 0 ? (double)abandoned.Count / cycles.Count : 0.0;
 
-            sb.AppendLine($"Completed: {completed.Count}  Abandoned: {abandoned.Count}  " +
+            sb.AppendLine($"Settled: {settled.Count}  Abandoned (settled): {settledAbandons.Count}  " +
                           $"Win rate: {winRate:P0}  Abandon rate: {abandonRate:P0}");
-            sb.AppendLine($"Avg ETH/cycle: {avgEthPerCycle:+0.00000;-0.00000}  " +
-                          $"Total from cycling: {(double)totalCyclingEth:+0.00000;-0.00000} ETH");
-            sb.AppendLine($"Rolling reward (last 5 non-abandoned): {_perf.RollingReward():+0.000;-0.000}");
+            sb.AppendLine($"Avg {ccy}/cycle (all settled): {avgEthPerCycle:+0.00000;-0.00000}  " +
+                          $"Total from cycling: {(double)totalCyclingEth:+0.00000;-0.00000} {ccy}");
+            sb.AppendLine($"Rolling reward (last 5): {_perf.RollingReward():+0.000;-0.000}");
 
-            sb.AppendLine("Recent cycles:");
+            sb.AppendLine("Recent cycles (WIN=clean gain, LOSS=settled abandon or negative rebuy, PENDING=recovery watch active):");
             foreach (var c in cycles.Take(5))
             {
-                var outcome  = c.IsAbandoned ? "SKIP" : (c.NetEthGain >= 0 ? " WIN" : "LOSS");
-                var durMins  = (c.CompletedAt - c.SellTimestamp).TotalMinutes;
-                sb.AppendLine($"  [{outcome}] {c.NetEthGain:+0.00000;-0.00000} ETH  " +
+                string outcome;
+                if (c.IsAbandoned && c.NetEthGain == 0m) outcome = "PEND";
+                else if (c.NetEthGain >= 0m)              outcome = " WIN";
+                else                                       outcome = "LOSS";
+                var durMins = (c.CompletedAt - c.SellTimestamp).TotalMinutes;
+                sb.AppendLine($"  [{outcome}] {c.NetEthGain:+0.00000;-0.00000} {ccy}  " +
                               $"sell={c.SellPrice:F2} buy={c.BuyPrice:F2}  " +
                               $"dur={durMins:F0}min  {c.CompletedAt:HH:mm dd-MMM}");
             }
