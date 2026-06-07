@@ -499,9 +499,43 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 _logger.LogInformation(
                     "RECOVERY WATCH EXPIRED | {Symbol} price rose {Rise:P2} further above sell ${Sell:F2} — resuming normal accumulation",
                     symbol, furtherRise, cs.PostAbandonSellPrice);
-                cs.PostAbandonSellPrice = 0m;
-                cs.PostAbandonSellQty   = 0m;
-                cs.PostAbandonSellTs    = default;
+
+                // Settle the abandoned position at the expiry price. The cash will be
+                // used by accumulation buys at unknown future prices; settling here gives
+                // the best available snapshot of the real loss and feeds the bandit correctly.
+                var expFeeRate     = _options.TakerFeePercent / 100m;
+                var expStep        = GetSymbolConfig(symbol)?.QuantityStep ?? 0.001m;
+                var expCash        = _portfolio.GetCash();
+                var expRebuyQty    = expCash > 0m
+                    ? RoundDownToStep(expCash / (close * (1m + expFeeRate)), expStep)
+                    : 0m;
+                var expNetGain     = expRebuyQty - cs.PostAbandonSellQty;
+
+                if (cs.PostAbandonCycleId.HasValue && _state.ActiveSessionId is not null)
+                    _db.UpdateAbandonedCycleRebuy(cs.PostAbandonCycleId.Value, expRebuyQty, close, expNetGain);
+
+                if (cs.PostAbandonSellFeatures.Length > 0)
+                    _state.NotifyCycleCompleted(new CycleCompletedEvent
+                    {
+                        Symbol         = symbol,
+                        IsAbandoned    = true,
+                        NetEthGain     = expNetGain,
+                        SellPrice      = cs.PostAbandonSellPrice,
+                        BuyPrice       = close,
+                        FeaturesAtSell = cs.PostAbandonSellFeatures,
+                        SellTimestamp  = cs.PostAbandonSellTs,
+                        CompletedAt    = DateTime.UtcNow
+                    });
+
+                _logger.LogInformation(
+                    "ABANDON SETTLED (EXPIRED) | {Symbol} expRebuyQty={EQ:F5} netGain={Gain:F5} @ ${Price:F2}",
+                    symbol, expRebuyQty, expNetGain, close);
+
+                cs.PostAbandonCycleId      = null;
+                cs.PostAbandonSellFeatures = [];
+                cs.PostAbandonSellPrice    = 0m;
+                cs.PostAbandonSellQty      = 0m;
+                cs.PostAbandonSellTs       = default;
                 // fall through — RSI accumulation now unblocked
             }
             else
