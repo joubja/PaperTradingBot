@@ -353,6 +353,22 @@ public class DatabaseService : IDisposable
             new { ts = DateTime.UtcNow.ToString("o"), id = cycleId });
     }
 
+    /// <summary>
+    /// Retroactively fills in the real rebuy outcome for an abandoned cycle when the
+    /// abandoned USDT is eventually rebuyed as part of a subsequent cycle.
+    /// NetEthGain will be negative (price rose), making the loss visible in the cycle table.
+    /// </summary>
+    public void UpdateAbandonedCycleRebuy(int cycleId, decimal boughtQty, decimal buyPrice, decimal netGain)
+    {
+        _conn.Execute("""
+            UPDATE CyclingCycles
+            SET BuyTimestamp=@ts, BoughtQuantity=@qty, BuyPrice=@price, NetEthGain=@gain
+            WHERE Id=@id AND IsAbandoned=1
+            """,
+            new { ts = DateTime.UtcNow.ToString("o"), qty = (double)boughtQty,
+                  price = (double)buyPrice, gain = (double)netGain, id = cycleId });
+    }
+
     public List<CycleResult> GetRecentCompleteCycles(string sessionId, int limit = 10)
     {
         return _conn.Query("""

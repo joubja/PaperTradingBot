@@ -31,8 +31,8 @@ namespace PaperTradingBot.Services;
 /// immediately after a rebuy or abandon, avoiding rapid fee-compounding micro-cycles.
 ///
 /// After every complete cycle the strategy checks the last 5 cycles in SQLite.
-/// If ≥ 3 of 5 completed with a net ETH loss (abandoned cycles don't count — price going
-/// up is opportunity cost, not an actual loss), cycling is suspended until a deep
+/// If ≥ 3 of 5 cycles have negative NetEthGain (including settled abandons), cycling is
+/// suspended until a deep
 /// dip (1-min RSI < 28) signals conditions may be improving.
 /// </summary>
 public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
@@ -346,12 +346,52 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 
                 var strength = Math.Round(Math.Clamp((rsiCycleRebuy - rsi + 10) / 30m, 0m, 1m), 4);
 
+                // Settle any abandoned position whose USDT was inherited into this rebuy.
+                // The total rebuy qty was computed from (abandon cash + new sell cash), so we
+                // carve out the abandon's portion and record its real P&L separately.
+                var newCycleRebuyQty = rebuyQty;
+                if (cs.PostAbandonInheritedCash > 0m)
+                {
+                    var abandonRebuyQty = RoundDownToStep(
+                        cs.PostAbandonInheritedCash / (close * feeMultiplier), rebuyStep);
+                    var abandonNetGain  = abandonRebuyQty - cs.PostAbandonInheritedSellQty;
+
+                    if (cs.PostAbandonCycleId.HasValue && _state.ActiveSessionId is not null)
+                        _db.UpdateAbandonedCycleRebuy(cs.PostAbandonCycleId.Value, abandonRebuyQty, close, abandonNetGain);
+
+                    if (cs.PostAbandonInheritedFeatures.Length > 0)
+                        _state.NotifyCycleCompleted(new CycleCompletedEvent
+                        {
+                            Symbol         = symbol,
+                            IsAbandoned    = true,
+                            NetEthGain     = abandonNetGain,
+                            SellPrice      = cs.PostAbandonInheritedSellPrice,
+                            BuyPrice       = close,
+                            FeaturesAtSell = cs.PostAbandonInheritedFeatures,
+                            SellTimestamp  = cs.PostAbandonInheritedSellTs,
+                            CompletedAt    = DateTime.UtcNow
+                        });
+
+                    _logger.LogInformation(
+                        "ABANDON SETTLED | {Symbol} abandonRebuyQty={AQ:F5} netGain={Gain:F5} @ ${Price:F2}",
+                        symbol, abandonRebuyQty, abandonNetGain, close);
+
+                    newCycleRebuyQty -= abandonRebuyQty;
+
+                    cs.PostAbandonCycleId              = null;
+                    cs.PostAbandonInheritedCash        = 0m;
+                    cs.PostAbandonInheritedSellQty     = 0m;
+                    cs.PostAbandonInheritedSellPrice   = 0m;
+                    cs.PostAbandonInheritedFeatures    = [];
+                    cs.PostAbandonInheritedSellTs      = default;
+                }
+
                 if (priorFeatures.Length > 0)
                     _state.NotifyCycleCompleted(new CycleCompletedEvent
                     {
                         Symbol         = symbol,
                         IsAbandoned    = false,
-                        NetEthGain     = rebuyQty - priorSellQty,
+                        NetEthGain     = newCycleRebuyQty - priorSellQty,
                         SellPrice      = priorSellPrice,
                         BuyPrice       = close,
                         FeaturesAtSell = priorFeatures,
@@ -389,9 +429,11 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     _db.MarkCycleAbandoned(cs.OpenCycleId.Value);
 
                 // Keep shadow state so recovery rebuy can fire if price dips back below sell price
-                cs.PostAbandonSellPrice = abandonSellPrice;
-                cs.PostAbandonSellQty   = abandonSellQty;
-                cs.PostAbandonSellTs    = abandonSellTs;
+                cs.PostAbandonSellPrice    = abandonSellPrice;
+                cs.PostAbandonSellQty      = abandonSellQty;
+                cs.PostAbandonSellTs       = abandonSellTs;
+                cs.PostAbandonSellFeatures = abandonFeatures;
+                cs.PostAbandonCycleId      = cs.OpenCycleId;
 
                 cs.ActiveSell       = false;
                 cs.OpenCycleId      = null;
@@ -604,9 +646,17 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                             if (cs.PostAbandonSellPrice > 0m)
                             {
                                 _logger.LogInformation("RECOVERY WATCH CANCELLED | new sell cycle starting for {Symbol}", symbol);
-                                cs.PostAbandonSellPrice = 0m;
-                                cs.PostAbandonSellQty   = 0m;
-                                cs.PostAbandonSellTs    = default;
+                                // Snapshot the abandoned position details so its real P&L can be
+                                // settled at the next rebuy (all current cash is from the abandoned sell)
+                                cs.PostAbandonInheritedCash        = _portfolio.GetCash();
+                                cs.PostAbandonInheritedSellQty     = cs.PostAbandonSellQty;
+                                cs.PostAbandonInheritedSellPrice   = cs.PostAbandonSellPrice;
+                                cs.PostAbandonInheritedFeatures    = cs.PostAbandonSellFeatures;
+                                cs.PostAbandonInheritedSellTs      = cs.PostAbandonSellTs;
+                                cs.PostAbandonSellPrice    = 0m;
+                                cs.PostAbandonSellQty      = 0m;
+                                cs.PostAbandonSellTs       = default;
+                                cs.PostAbandonSellFeatures = [];
                             }
 
                             cs.ActiveSell     = true;
@@ -780,9 +830,9 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
         var cycles = _db.GetRecentCompleteCycles(_state.ActiveSessionId, limit: 5);
         if (cycles.Count >= 3 && _cycleState.TryGetValue(symbol, out var cs))
         {
-            // Abandoned cycles represent opportunity cost, not actual ETH loss, so they
-            // don't signal deteriorating conditions — only loss-completed cycles count.
-            var failures = cycles.Count(c => !c.IsAbandoned && !c.IsProfit);
+            // Settled abandons (NetEthGain < 0) count as real losses here; only zero-gain
+            // abandon stubs (not yet settled) are excluded.
+            var failures = cycles.Count(c => c.NetEthGain < 0);
 
             if (failures >= 3 && _cyclingEnabled)
             {
@@ -937,9 +987,20 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
         public float[]  FeaturesAtSell   { get; set; } = [];
 
         // Post-abandon recovery: price to watch for a full-cash rebuy after abandonment
-        public decimal  PostAbandonSellPrice { get; set; }
-        public decimal  PostAbandonSellQty   { get; set; }
-        public DateTime PostAbandonSellTs    { get; set; }
+        public decimal  PostAbandonSellPrice    { get; set; }
+        public decimal  PostAbandonSellQty      { get; set; }
+        public DateTime PostAbandonSellTs       { get; set; }
+        public float[]  PostAbandonSellFeatures { get; set; } = [];
+        public int?     PostAbandonCycleId      { get; set; }
+
+        // Inherited abandon cash: when recovery watch is cancelled by a new sell, the
+        // abandoned USDT gets folded into the next rebuy. These fields let us settle the
+        // real P&L of the abandoned position at that rebuy time.
+        public decimal  PostAbandonInheritedCash      { get; set; }
+        public decimal  PostAbandonInheritedSellQty   { get; set; }
+        public decimal  PostAbandonInheritedSellPrice { get; set; }
+        public float[]  PostAbandonInheritedFeatures  { get; set; } = [];
+        public DateTime PostAbandonInheritedSellTs    { get; set; }
 
         // Suspension circuit-breaker state
         public DateTime SuspendedAt       { get; set; }  // when cycling was last suspended

@@ -25,12 +25,11 @@ public sealed class CycleCompletedEvent
     public DateTime CompletedAt    { get; init; }
 
     /// <summary>
-    /// Reward in [-1, 1] for NN training.
-    /// Abandoned cycles yield 0 — price rising is opportunity cost, not a loss signal.
+    /// Reward in [-1, 1] for bandit/NN training.
+    /// Settled abandons carry real negative NetEthGain and produce negative reward.
+    /// Immediate abandon events (NetEthGain=0) produce 0 — the real cost is recognised at settle time.
     /// </summary>
-    public float Reward => IsAbandoned
-        ? 0f
-        : (float)Math.Tanh((double)NetEthGain * 150.0);
+    public float Reward => (float)Math.Tanh((double)NetEthGain * 150.0);
 }
 
 /// <summary>
@@ -66,12 +65,13 @@ public sealed class PerformanceTracker
         get { lock (_lock) return _history.Count; }
     }
 
-    /// <summary>Rolling average reward over the last N non-abandoned cycles.</summary>
+    /// <summary>Rolling average reward over the last N actionable cycles (excludes zero-NetEthGain abandon stubs).</summary>
     public float RollingReward(int window = 5)
     {
         lock (_lock)
         {
-            var recent = _history.Take(window).Where(e => !e.IsAbandoned).ToList();
+            // Include settled abandons (real negative NetEthGain); exclude immediate abandon stubs (NetEthGain=0)
+            var recent = _history.Take(window).Where(e => !e.IsAbandoned || e.NetEthGain != 0m).ToList();
             return recent.Count == 0 ? 0f : recent.Average(e => e.Reward);
         }
     }
@@ -119,12 +119,12 @@ public sealed class PerformanceTracker
         }
     }
 
-    /// <summary>True when recent completed (non-abandoned) cycles are mostly losing ETH.</summary>
+    /// <summary>True when recent cycles (including settled abandons) are mostly losing coin.</summary>
     public bool IsDegrading(int window = 5)
     {
         lock (_lock)
         {
-            var completed = _history.Where(e => !e.IsAbandoned).Take(window).ToList();
+            var completed = _history.Where(e => !e.IsAbandoned || e.NetEthGain != 0m).Take(window).ToList();
             return completed.Count >= 3 && completed.Count(e => e.Reward < 0) >= 3;
         }
     }

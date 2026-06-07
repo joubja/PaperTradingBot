@@ -74,8 +74,9 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
            - SELLS a fraction of {{ccy}} (DefaultSellPct) for USDT cash
            - Waits for price to DROP into the MinAbandonRise–MaxAbandonRise band
            - REBUYS all cash for {{ccy}} → net MORE {{ccy}} than was sold (profit from the spread)
-           - If price RISES instead, the cycle is ABANDONED: no trade, no {{ccy}} change
-           A completed cycle = {{ccy}} gain. An abandoned cycle = neutral (opportunity cost only).
+           - If price RISES instead, the cycle is ABANDONED: the USDT is rebuyed at a higher price
+             than it was sold → net FEWER {{ccy}} than before. This is a real coin loss, not neutral.
+           A completed cycle = {{ccy}} gain. An abandoned cycle = {{ccy}} loss (USDT rebuyed above sell price).
 
         WHAT EACH SETTING CONTROLS:
         - RsiDipBuy: RSI threshold for dip accumulation buys. Lower = stricter entries, fewer buys.
