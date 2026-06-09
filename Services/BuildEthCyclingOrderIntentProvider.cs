@@ -363,19 +363,18 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                             _logger.LogWarning("ABANDON SETTLE | {Symbol} cycleId={Id} not found or not abandoned — P&L lost", symbol, cs.PostAbandonCycleId.Value);
                     }
 
-                    if (cs.PostAbandonInheritedFeatures.Length > 0)
-                        _state.NotifyCycleCompleted(new CycleCompletedEvent
-                        {
-                            Symbol           = symbol,
-                            IsAbandoned      = true,
-                            NetEthGain       = abandonNetGain,
-                            SellPrice        = cs.PostAbandonInheritedSellPrice,
-                            BuyPrice         = close,
-                            FeaturesAtSell   = cs.PostAbandonInheritedFeatures,
-                            SellTimestamp    = cs.PostAbandonInheritedSellTs,
-                            CompletedAt      = DateTime.UtcNow,
-                            StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
-                        });
+                    _state.NotifyCycleCompleted(new CycleCompletedEvent
+                    {
+                        Symbol           = symbol,
+                        IsAbandoned      = true,
+                        NetEthGain       = abandonNetGain,
+                        SellPrice        = cs.PostAbandonInheritedSellPrice,
+                        BuyPrice         = close,
+                        FeaturesAtSell   = cs.PostAbandonInheritedFeatures,
+                        SellTimestamp    = cs.PostAbandonInheritedSellTs,
+                        CompletedAt      = DateTime.UtcNow,
+                        StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
+                    });
 
                     _logger.LogInformation(
                         "ABANDON SETTLED | {Symbol} abandonRebuyQty={AQ:F5} netGain={Gain:F5} @ ${Price:F2}",
@@ -391,19 +390,18 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     cs.PostAbandonInheritedSellTs      = default;
                 }
 
-                if (priorFeatures.Length > 0)
-                    _state.NotifyCycleCompleted(new CycleCompletedEvent
-                    {
-                        Symbol           = symbol,
-                        IsAbandoned      = false,
-                        NetEthGain       = newCycleRebuyQty - priorSellQty,
-                        SellPrice        = priorSellPrice,
-                        BuyPrice         = close,
-                        FeaturesAtSell   = priorFeatures,
-                        SellTimestamp    = priorSellTs,
-                        CompletedAt      = DateTime.UtcNow,
-                        StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
-                    });
+                _state.NotifyCycleCompleted(new CycleCompletedEvent
+                {
+                    Symbol           = symbol,
+                    IsAbandoned      = false,
+                    NetEthGain       = newCycleRebuyQty - priorSellQty,
+                    SellPrice        = priorSellPrice,
+                    BuyPrice         = close,
+                    FeaturesAtSell   = priorFeatures,
+                    SellTimestamp    = priorSellTs,
+                    CompletedAt      = DateTime.UtcNow,
+                    StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
+                });
 
                 return new OrderIntent
                 {
@@ -449,19 +447,18 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 cs.FeaturesAtSell   = [];
                 cs.CooldownBarsLeft = cycleCooldownBars;
 
-                if (abandonFeatures.Length > 0)
-                    _state.NotifyCycleCompleted(new CycleCompletedEvent
-                    {
-                        Symbol           = symbol,
-                        IsAbandoned      = true,
-                        NetEthGain       = 0m,
-                        SellPrice        = abandonSellPrice,
-                        BuyPrice         = close,
-                        FeaturesAtSell   = abandonFeatures,
-                        SellTimestamp    = abandonSellTs,
-                        CompletedAt      = DateTime.UtcNow,
-                        StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
-                    });
+                _state.NotifyCycleCompleted(new CycleCompletedEvent
+                {
+                    Symbol           = symbol,
+                    IsAbandoned      = true,
+                    NetEthGain       = 0m,
+                    SellPrice        = abandonSellPrice,
+                    BuyPrice         = close,
+                    FeaturesAtSell   = abandonFeatures,
+                    SellTimestamp    = abandonSellTs,
+                    CompletedAt      = DateTime.UtcNow,
+                    StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
+                });
 
                 if (_state.ActiveSessionId is not null)
                     RecheckFeasibility(symbol, rsi);
@@ -525,19 +522,18 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                         _logger.LogWarning("ABANDON SETTLE (EXPIRED) | {Symbol} cycleId={Id} not found — P&L lost", symbol, cs.PostAbandonCycleId.Value);
                 }
 
-                if (cs.PostAbandonSellFeatures.Length > 0)
-                    _state.NotifyCycleCompleted(new CycleCompletedEvent
-                    {
-                        Symbol           = symbol,
-                        IsAbandoned      = true,
-                        NetEthGain       = expNetGain,
-                        SellPrice        = cs.PostAbandonSellPrice,
-                        BuyPrice         = close,
-                        FeaturesAtSell   = cs.PostAbandonSellFeatures,
-                        SellTimestamp    = cs.PostAbandonSellTs,
-                        CompletedAt      = DateTime.UtcNow,
-                        StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
-                    });
+                _state.NotifyCycleCompleted(new CycleCompletedEvent
+                {
+                    Symbol           = symbol,
+                    IsAbandoned      = true,
+                    NetEthGain       = expNetGain,
+                    SellPrice        = cs.PostAbandonSellPrice,
+                    BuyPrice         = close,
+                    FeaturesAtSell   = cs.PostAbandonSellFeatures,
+                    SellTimestamp    = cs.PostAbandonSellTs,
+                    CompletedAt      = DateTime.UtcNow,
+                    StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
+                });
 
                 _logger.LogInformation(
                     "ABANDON SETTLED (EXPIRED) | {Symbol} expRebuyQty={EQ:F5} netGain={Gain:F5} @ ${Price:F2}",
@@ -603,19 +599,18 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 
                     // Notify bandit — recovery rebuys are settled abandons; IsAbandoned=true so the
                     // circuit breaker and advisor see the real abandon outcome, not a clean win.
-                    if (priorFeaturesSaved.Length > 0)
-                        _state.NotifyCycleCompleted(new CycleCompletedEvent
-                        {
-                            Symbol           = symbol,
-                            IsAbandoned      = true,
-                            NetEthGain       = netGain,
-                            SellPrice        = priorSellPrice,
-                            BuyPrice         = close,
-                            FeaturesAtSell   = priorFeaturesSaved,
-                            SellTimestamp    = priorSellTs,
-                            CompletedAt      = DateTime.UtcNow,
-                            StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
-                        });
+                    _state.NotifyCycleCompleted(new CycleCompletedEvent
+                    {
+                        Symbol           = symbol,
+                        IsAbandoned      = true,
+                        NetEthGain       = netGain,
+                        SellPrice        = priorSellPrice,
+                        BuyPrice         = close,
+                        FeaturesAtSell   = priorFeaturesSaved,
+                        SellTimestamp    = priorSellTs,
+                        CompletedAt      = DateTime.UtcNow,
+                        StartingQuantity = _options.StartingQuantity > 0m ? _options.StartingQuantity : 1.0m,
+                    });
 
                     RecheckFeasibility(symbol, rsi);
 
