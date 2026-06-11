@@ -22,7 +22,10 @@ namespace PaperTradingBot.AI;
 ///   2. Degradation — when PerformanceTracker.IsDegrading() is true after any cycle,
 ///      subject to a 5-minute debounce to prevent hammering the API.
 ///
-/// Safety: never applies adjustments when StrategyStatus.Phase == "ActiveSell".
+/// Safety: during StrategyStatus.Phase == "ActiveSell" only RsiCycleRebuy is held back
+/// (it is read live each bar and would perturb the in-flight rebuy trigger); all other
+/// settings only affect future cycles and are applied normally. A blanket ActiveSell
+/// skip used to starve bots that sit mid-cycle for days.
 /// </summary>
 public sealed class ClaudeAdvisorService : IHostedService, IDisposable
 {
@@ -289,13 +292,6 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
             return;
         }
 
-        if (_botState.StrategyStatus?.Phase == "ActiveSell")
-        {
-            _logger.LogDebug("CLAUDE ADVISOR | Skipping apply — ActiveSell in progress.");
-            RecordRun(trigger, dto.Reasoning ?? "", "skipped (ActiveSell)");
-            return;
-        }
-
         if (_optimizerState.IsPaused)
         {
             _logger.LogInformation("CLAUDE ADVISOR | Paused — reasoning logged, no settings applied. {R}", dto.Reasoning);
@@ -308,10 +304,20 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
             .EnumerateObject()
             .ToDictionary(p => p.Name, p => p.Value, StringComparer.OrdinalIgnoreCase);
 
+        // Mid-cycle, RsiCycleRebuy is read live each bar and would perturb the in-flight
+        // rebuy trigger — hold it back. Everything else only affects future cycles (the
+        // abandon threshold is snapshotted at sell time), so it applies normally.
+        var heldNote = "";
+        if (_botState.StrategyStatus?.Phase == "ActiveSell" && adj.Remove("RsiCycleRebuy"))
+        {
+            heldNote = "  [RsiCycleRebuy held — ActiveSell]";
+            _logger.LogInformation("CLAUDE ADVISOR | RsiCycleRebuy adjustment held — ActiveSell in progress.");
+        }
+
         var changed = new List<string>();
         ApplyAll(adj, changed);
 
-        var changesStr = string.Join("  ", changed);
+        var changesStr = string.Join("  ", changed) + heldNote;
         if (changed.Count > 0)
             _logger.LogInformation(
                 "CLAUDE ADVISOR | [{Trigger}] {Count} adjustment(s): {Changes}",
