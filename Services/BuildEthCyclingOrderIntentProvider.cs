@@ -325,6 +325,10 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 var priorSellTs    = cs.SellTimestamp;
                 var priorCycleId   = cs.OpenCycleId;   // carry to intent for post-fill DB correction
 
+                // The cycle may only claim what its own sell proceeds can repurchase;
+                // any cash beyond that (settled abandons, residue) is not cycle gain.
+                var ownRebuyQty = OwnProceedsRebuyQty(priorSellQty, priorSellPrice, close, rebuyStep);
+
                 _logger.LogInformation(
                     "CYCLE REBUY | {Symbol} Sell={Sell:F4} Low={Low:F4} Close={Close:F4} Dip={Dip:P2} Bounce={Bounce:P2} RSI={Rsi:F1}",
                     symbol, cs.SellPrice, cs.TrailingLow, close, dipDepth, bounceFromLow, rsi);
@@ -332,7 +336,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 cs.ActiveSell  = false;
 
                 if (cs.OpenCycleId.HasValue && !string.IsNullOrEmpty(_state.ActiveSessionId))
-                    CompleteCycleAndCheckFeasibility(symbol, cs.OpenCycleId.Value, close, rsi);
+                    CompleteCycleAndCheckFeasibility(symbol, cs.OpenCycleId.Value, close, rsi, ownRebuyQty);
 
                 cs.OpenCycleId      = null;
                 cs.SellPrice        = 0m;
@@ -354,6 +358,10 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 {
                     var abandonRebuyQty = RoundDownToStep(
                         cs.PostAbandonInheritedCash / (close * feeMultiplier), rebuyStep);
+                    // Inherited cash was snapshotted as ALL cash at sell time and may include
+                    // residue beyond the abandon's own proceeds — cap the settle the same way.
+                    abandonRebuyQty = Math.Min(abandonRebuyQty, OwnProceedsRebuyQty(
+                        cs.PostAbandonInheritedSellQty, cs.PostAbandonInheritedSellPrice, close, rebuyStep));
                     var abandonNetGain  = abandonRebuyQty - cs.PostAbandonInheritedSellQty;
 
                     if (cs.PostAbandonCycleId.HasValue && _state.ActiveSessionId is not null)
@@ -394,7 +402,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 {
                     Symbol           = symbol,
                     IsAbandoned      = false,
-                    NetEthGain       = newCycleRebuyQty - priorSellQty,
+                    NetEthGain       = Math.Min(newCycleRebuyQty, ownRebuyQty) - priorSellQty,
                     SellPrice        = priorSellPrice,
                     BuyPrice         = close,
                     FeaturesAtSell   = priorFeatures,
@@ -412,7 +420,8 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     SignalStrength         = strength,
                     IndicatorContext       = ctx,
                     TargetQuantityOverride = rebuyQty,
-                    CycleId                = priorCycleId   // runtime corrects DB with actual fill qty
+                    CycleId                = priorCycleId,  // runtime corrects DB with actual fill qty
+                    CycleBuyQtyCap         = ownRebuyQty    // cap DB gain attribution to own proceeds
                 };
             }
 
@@ -513,6 +522,9 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 var expRebuyQty    = expCash > 0m
                     ? RoundDownToStep(expCash / (close * (1m + expFeeRate)), expStep)
                     : 0m;
+                // Cash may include residue beyond this abandon's own proceeds — cap attribution.
+                expRebuyQty        = Math.Min(expRebuyQty, OwnProceedsRebuyQty(
+                    cs.PostAbandonSellQty, cs.PostAbandonSellPrice, close, expStep));
                 var expNetGain     = expRebuyQty - cs.PostAbandonSellQty;
 
                 if (cs.PostAbandonCycleId.HasValue && _state.ActiveSessionId is not null)
@@ -587,7 +599,11 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 
                 if (_state.ActiveSessionId is not null)
                 {
-                    var netGain = rcvQty - priorSellQty;
+                    // Attribute only what the abandon's own proceeds can repurchase;
+                    // the rebuy order still spends all cash, but residue is not gain.
+                    var rcvOwnQty = Math.Min(rcvQty, OwnProceedsRebuyQty(
+                        priorSellQty, priorSellPrice, close, rcvStep));
+                    var netGain = rcvOwnQty - priorSellQty;
                     _logger.LogInformation(
                         "RECOVERY REBUY | {Symbol} SellPrice={Sell:F4} Close={Close:F4} Dip={Dip:P2} RSI={Rsi:F1} Qty={Qty:F5} NetEthGain={Gain:F5}",
                         symbol, priorSellPrice, close, recoveryDip, rsi, rcvQty, netGain);
@@ -595,7 +611,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                     // Insert with estimated qty; runtime corrects with actual fill qty via CycleId
                     var recoveryRowId = _db.InsertCompletedCycle(_state.ActiveSessionId, symbol,
                         priorSellQty, priorSellPrice, priorSellTs,
-                        rcvQty, close);
+                        rcvOwnQty, close);
 
                     // Notify bandit — recovery rebuys are settled abandons; IsAbandoned=true so the
                     // circuit breaker and advisor see the real abandon outcome, not a clean win.
@@ -627,7 +643,8 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                         SignalStrength         = Math.Round(Math.Clamp((rsiCycleRebuy - rsi + 10) / 30m, 0m, 1m), 4),
                         IndicatorContext       = ctx,
                         TargetQuantityOverride = rcvQty,
-                        CycleId                = recoveryRowId  // runtime corrects DB with actual fill qty
+                        CycleId                = recoveryRowId, // runtime corrects DB with actual fill qty
+                        CycleBuyQtyCap         = rcvOwnQty      // cap DB gain attribution to own proceeds
                     };
                 }
             }
@@ -866,14 +883,15 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
         return OrderIntent.None($"No signal | cycling={_cyclingEnabled} trend={strongUptrend} | {ctx}");
     }
 
-    private void CompleteCycleAndCheckFeasibility(string symbol, int cycleId, decimal buyPrice, decimal rsi)
+    private void CompleteCycleAndCheckFeasibility(string symbol, int cycleId, decimal buyPrice, decimal rsi, decimal maxAttributableQty)
     {
-        // Estimate bought quantity from current available cash / price
+        // Estimate bought quantity from current available cash / price, capped at what the
+        // cycle's own sell proceeds can repurchase — extra cash is not this cycle's gain.
         var cash = _portfolio.GetCash();
         var symbolConfig = GetSymbolConfig(symbol);
         var step = symbolConfig?.QuantityStep ?? 0.001m;
         var estimatedBuyQty = cash > 0m && buyPrice > 0m
-            ? RoundDownToStep(cash / buyPrice, step)
+            ? Math.Min(RoundDownToStep(cash / buyPrice, step), maxAttributableQty)
             : 0m;
 
         if (estimatedBuyQty > 0m)
@@ -932,6 +950,21 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
 
     private static decimal RoundDownToStep(decimal value, decimal step) =>
         step > 0m ? Math.Floor(value / step) * step : value;
+
+    /// <summary>
+    /// Maximum quantity a cycle may claim as its own rebuy: what the proceeds of its own
+    /// sell (net of sell fee) can repurchase at <paramref name="buyPrice"/> (net of buy fee).
+    /// Rebuys spend ALL available cash, which can include money from settled abandons or
+    /// other residue — counting that as cycle gain inflated NetEthGain by orders of
+    /// magnitude (e.g. +1.164 ETH reported vs +0.002 ETH real wallet gain).
+    /// </summary>
+    private decimal OwnProceedsRebuyQty(decimal sellQty, decimal sellPrice, decimal buyPrice, decimal step)
+    {
+        if (sellQty <= 0m || sellPrice <= 0m || buyPrice <= 0m) return 0m;
+        var feeRate  = _options.TakerFeePercent / 100m;
+        var proceeds = sellQty * sellPrice * (1m - feeRate);
+        return RoundDownToStep(proceeds / (buyPrice * (1m + feeRate)), step);
+    }
 
     /// <summary>
     /// Aggregates raw 10-second candles into higher-timeframe close prices.

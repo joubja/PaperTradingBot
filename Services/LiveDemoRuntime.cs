@@ -691,9 +691,16 @@ public class LiveDemoRuntime : ITradingRuntime
                 Note = fill.Reason
             });
 
-            // Correct the pre-execution estimated qty in the cycle DB record with the actual fill
+            // Correct the pre-execution estimated qty in the cycle DB record with the actual
+            // fill, capped at what the cycle's own sell proceeds could repurchase — the fill
+            // may include redeployed abandon cash that is not this cycle's gain.
             if (intent.CycleId.HasValue && !string.IsNullOrEmpty(_sessionId))
-                _db.CorrectCycleBuyQty(intent.CycleId.Value, fill.FilledQuantity, fill.FillPrice);
+            {
+                var attributedQty = intent.CycleBuyQtyCap.HasValue
+                    ? Math.Min(fill.FilledQuantity, intent.CycleBuyQtyCap.Value)
+                    : fill.FilledQuantity;
+                _db.CorrectCycleBuyQty(intent.CycleId.Value, attributedQty, fill.FillPrice);
+            }
 
             return true;
         }

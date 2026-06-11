@@ -35,6 +35,14 @@ public class OrderIntent
     /// </summary>
     public int? CycleId { get; set; }
 
+    /// <summary>
+    /// Maximum buy quantity attributable to the cycle in <see cref="CycleId"/> when the
+    /// post-fill DB correction runs: what the cycle's own sell proceeds can repurchase.
+    /// A rebuy spends ALL cash (possibly including settled-abandon money or residue);
+    /// without this cap that extra cash would be recorded as cycle gain.
+    /// </summary>
+    public decimal? CycleBuyQtyCap { get; set; }
+
     public bool IsActionable =>
         IntentType == OrderIntentType.Buy || IntentType == OrderIntentType.Sell;
 

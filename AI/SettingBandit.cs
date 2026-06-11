@@ -82,6 +82,20 @@ public sealed class SettingBandit
     }
 
     /// <summary>
+    /// Step the active arm one index lower WITHOUT recording a pull. Used by drought
+    /// recovery: zero-reward pulls would dilute the arm means and destroy the UCB signal,
+    /// so a stalled bandit just walks down toward easier thresholds until a real cycle
+    /// completes and normal RecordReward/SelectNext flow resumes.
+    /// Returns true if the arm changed (false when already at the lowest arm).
+    /// </summary>
+    public bool StepDown()
+    {
+        if (_activeArm == 0) return false;
+        _activeArm--;
+        return true;
+    }
+
+    /// <summary>
     /// Compact description for logging: "[33:-0.1/2, 40:+0.2/5*, 47:0.0/1]"
     /// Asterisk marks the active arm.
     /// </summary>

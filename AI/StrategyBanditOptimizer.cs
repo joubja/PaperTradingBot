@@ -297,15 +297,25 @@ public sealed class StrategyBanditOptimizer : IHostedService
         var prevArm = _cycleSell.ActiveArm;
         var prevVal = _cycleSell.CurrentValue;
 
-        _cycleSell.RecordReward(0f);
-        _cycleRebuy.RecordReward(0f);
-        _cycleSell.SelectNext();
-        _cycleRebuy.SelectNext();
+        // Step down WITHOUT recording a pull — zero-reward pulls poison the UCB means
+        // (they once outnumbered real cycle pulls ~10:1 and made arms indistinguishable).
+        var stepped = _cycleSell.StepDown();
+        _cycleRebuy.StepDown();
+
+        if (!stepped)
+        {
+            // Already at the lowest threshold; the market is just quiet. Nothing to learn.
+            _logger.LogInformation(
+                "BANDIT | Drought {H:F1}h — already at lowest sell arm ({Val}), holding",
+                drought.TotalHours, prevVal);
+            return;
+        }
+
         ApplyAll(0f);
         TrySaveState();
 
         _logger.LogWarning(
-            "BANDIT | Drought {H:F1}h — sell arm stepped: {PrevArm}={PrevVal} → arm {NewArm}={NewVal}",
+            "BANDIT | Drought {H:F1}h — sell arm stepped down: {PrevArm}={PrevVal} → arm {NewArm}={NewVal}",
             drought.TotalHours, prevArm, prevVal, _cycleSell.ActiveArm, _cycleSell.CurrentValue);
     }
 
