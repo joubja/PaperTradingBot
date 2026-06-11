@@ -470,6 +470,35 @@ public class DatabaseService : IDisposable
             .ToList();
     }
 
+    /// <summary>
+    /// Unsettled abandons whose recovery watch should survive a crash: abandoned rows with
+    /// no recorded rebuy (BoughtQuantity 0/NULL) that are still the LATEST completed row
+    /// for their symbol. Anything completed after an abandon would have settled it (rebuy
+    /// carve-out or expiry), so an older unsettled stub means its cash is already gone —
+    /// those are excluded. Rows after a valid match can only be open cycles (IsComplete=0),
+    /// which means the watch was cancelled by a new sell and its cash inherited.
+    /// </summary>
+    public List<UnsettledAbandonInfo> GetActiveUnsettledAbandons(string sessionId)
+    {
+        return _conn.Query("""
+            SELECT Id, Symbol, SoldQuantity, SellPrice, SellTimestamp
+            FROM CyclingCycles c
+            WHERE SessionId=@sid AND IsAbandoned=1
+              AND (BoughtQuantity IS NULL OR BoughtQuantity=0)
+              AND Id = (SELECT MAX(Id) FROM CyclingCycles
+                        WHERE SessionId=@sid AND Symbol=c.Symbol AND IsComplete=1)
+            """,
+            new { sid = sessionId })
+            .Select(r => new UnsettledAbandonInfo(
+                (int)(long)r.Id,
+                (string)r.Symbol,
+                (decimal)(double)r.SoldQuantity,
+                (decimal)(double)r.SellPrice,
+                DateTime.Parse((string)r.SellTimestamp, null,
+                    System.Globalization.DateTimeStyles.RoundtripKind)))
+            .ToList();
+    }
+
     public void ResumeSession(string sessionId)
     {
         _conn.Execute(
@@ -536,6 +565,9 @@ public class DatabaseService : IDisposable
 // ── Records / view models ─────────────────────────────────────────────────────
 
 public record OpenCycleInfo(int Id, string Symbol, decimal SoldQuantity, decimal SellPrice);
+
+public record UnsettledAbandonInfo(
+    int Id, string Symbol, decimal SoldQuantity, decimal SellPrice, DateTime SellTimestamp);
 
 public class SessionSummary
 {

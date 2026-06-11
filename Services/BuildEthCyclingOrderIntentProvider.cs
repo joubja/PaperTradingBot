@@ -178,6 +178,48 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 "RESUME | Restored active sell cycle for {Symbol}: SellPrice={Price:F4} Qty={Qty:F5}",
                 cycle.Symbol, cycle.SellPrice, cycle.SoldQuantity);
         }
+
+        // Restore post-abandon recovery-watch shadow state from the abandoned cycle row.
+        // Before this, a crash during a recovery watch lost the state entirely: the abandon
+        // stayed an unsettled zero-gain stub and its cash silently funded future buys.
+        // FeaturesAtSell are not persisted — restored watches settle with empty features,
+        // which the bandit/drift handlers already tolerate.
+        foreach (var ab in db.GetActiveUnsettledAbandons(sessionId))
+        {
+            if (!_cycleState.TryGetValue(ab.Symbol, out var cs))
+            {
+                cs = new CycleState { AbandonRisePct = 0.03m };
+                _cycleState[ab.Symbol] = cs;
+            }
+
+            if (cs.ActiveSell)
+            {
+                // Crash happened after a new sell cancelled the watch: restore the inherited
+                // settle state. The original all-cash snapshot is gone; use the abandon's own
+                // proceeds instead — the rebuy carve-out caps at own proceeds anyway, so the
+                // settled P&L comes out identical.
+                cs.PostAbandonInheritedCash      = ab.SoldQuantity * ab.SellPrice * (1m - _options.TakerFeePercent / 100m);
+                cs.PostAbandonInheritedSellQty   = ab.SoldQuantity;
+                cs.PostAbandonInheritedSellPrice = ab.SellPrice;
+                cs.PostAbandonInheritedSellTs    = ab.SellTimestamp;
+                cs.PostAbandonCycleId            = ab.Id;
+
+                _logger.LogInformation(
+                    "RESUME | Restored inherited abandon for {Symbol} (cycleId={Id}): sold {Qty:F5} @ {Price:F4} — settles at next rebuy",
+                    ab.Symbol, ab.Id, ab.SoldQuantity, ab.SellPrice);
+            }
+            else
+            {
+                cs.PostAbandonSellPrice = ab.SellPrice;
+                cs.PostAbandonSellQty   = ab.SoldQuantity;
+                cs.PostAbandonSellTs    = ab.SellTimestamp;
+                cs.PostAbandonCycleId   = ab.Id;
+
+                _logger.LogInformation(
+                    "RESUME | Restored recovery watch for {Symbol} (cycleId={Id}): sold {Qty:F5} @ {Price:F4}",
+                    ab.Symbol, ab.Id, ab.SoldQuantity, ab.SellPrice);
+            }
+        }
     }
 
     public OrderIntent GetIntent(string symbol, IReadOnlyList<Candle> history)
