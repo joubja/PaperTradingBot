@@ -307,8 +307,15 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
         // Mid-cycle, RsiCycleRebuy is read live each bar and would perturb the in-flight
         // rebuy trigger — hold it back. Everything else only affects future cycles (the
         // abandon threshold is snapshotted at sell time), so it applies normally.
+        // Phase alone is not crash-safe: after a restart the bot warms up for ~15 min in
+        // Phase=WarmingUp while a restored sell cycle is still open — but that status
+        // carries SellPrice, so check it too. Null status (just booted) counts as unsafe.
+        var status = _botState.StrategyStatus;
+        var inFlightSell = status is null
+            || status.Phase == "ActiveSell"
+            || (status.SellPrice ?? 0m) > 0m;
         var heldNote = "";
-        if (_botState.StrategyStatus?.Phase == "ActiveSell" && adj.Remove("RsiCycleRebuy"))
+        if (inFlightSell && adj.Remove("RsiCycleRebuy"))
         {
             heldNote = "  [RsiCycleRebuy held — ActiveSell]";
             _logger.LogInformation("CLAUDE ADVISOR | RsiCycleRebuy adjustment held — ActiveSell in progress.");
