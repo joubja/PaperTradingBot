@@ -6,6 +6,7 @@ using PaperTradingBot.Interfaces;
 using PaperTradingBot.Providers.Alpaca;
 using PaperTradingBot.Providers.Binance;
 using PaperTradingBot.Services;
+using System.Globalization;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -25,6 +26,16 @@ builder.Configuration
 builder.Logging.ClearProviders();
 builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "yyyy-MM-dd HH:mm:ss "; });
 builder.Logging.SetMinimumLevel(LogLevel.Information);
+
+// ── Backtest replay mode (CLI) — isolated sandbox, no web host, no live bot ────
+var backtestArgs = BacktestArgs.TryParse(args);
+if (backtestArgs is not null)
+{
+    foreach (var suffix in new[] { "", "-wal", "-shm" })
+        try { File.Delete(backtestArgs.SandboxDb + suffix); } catch { /* start from a fresh sandbox DB */ }
+    builder.Configuration.AddInMemoryCollection(backtestArgs.ConfigOverrides());
+    builder.Logging.SetMinimumLevel(LogLevel.Warning); // silence per-bar logs; the report uses Console
+}
 
 var services = builder.Services;
 
@@ -100,6 +111,7 @@ services.AddSingleton<IBarAggregationService>(sp =>
     return new LiveBarAggregationService(opts.Runtime.BarSeconds);
 });
 services.AddSingleton<IBarDecisionPipeline, BarDecisionPipeline>();
+services.AddSingleton<BarProcessor>();
 services.AddSingleton<AlpacaLiveMarketDataFeed>();
 services.AddSingleton<BinanceLiveMarketDataFeed>();
 services.AddSingleton<BinanceTestnetExecutionGateway>();
@@ -111,6 +123,7 @@ services.AddSingleton<BacktestEngine>();
 
 // ── Runtimes ──────────────────────────────────────────────────────────────────
 services.AddSingleton<BacktestRuntime>();
+services.AddSingleton<ReplayRuntime>();
 services.AddSingleton<LiveDemoRuntime>();
 services.AddSingleton<ITradingRuntime>(sp => sp.GetRequiredService<LiveDemoRuntime>());
 
@@ -125,6 +138,13 @@ services.AddSingleton<NotificationService>();
 services.AddHostedService<BotMonitorService>();
 
 var app = builder.Build();
+
+// ── Backtest replay: run the sandbox replay and exit (no web host / live bot) ──
+if (backtestArgs is not null)
+{
+    await app.Services.GetRequiredService<ReplayRuntime>().RunAsync(CancellationToken.None);
+    return;
+}
 
 // Recover any sessions left in Running state by previous crash
 app.Services.GetRequiredService<DatabaseService>();
@@ -207,3 +227,52 @@ app.MapGet("/health", (BotStateService state, LiveDemoRuntime runtime, BinanceLi
 });
 
 app.Run();
+
+
+// ── Backtest CLI args + sandbox config overrides ──────────────────────────────
+// Usage: dotnet run -- --backtest --symbol ETHUSDT --data data/backtest/ETHUSDT-10s-uptrend.csv
+//                     --starting-qty 1.630248 [--slippage 0.0005]
+sealed record BacktestArgs(string Symbol, string DataPath, decimal StartingQty, decimal? Slippage, string SandboxDb)
+{
+    public static BacktestArgs? TryParse(string[] args)
+    {
+        if (!args.Contains("--backtest")) return null;
+
+        string? Get(string name)
+        {
+            var i = Array.IndexOf(args, name);
+            return i >= 0 && i < args.Length - 1 ? args[i + 1] : null;
+        }
+
+        var symbol = (Get("--symbol") ?? throw new ArgumentException("--backtest requires --symbol")).ToUpperInvariant();
+        var data   = Get("--data") ?? throw new ArgumentException("--backtest requires --data");
+        var qty    = decimal.Parse(Get("--starting-qty") ?? throw new ArgumentException("--backtest requires --starting-qty"),
+                                   CultureInfo.InvariantCulture);
+        decimal? slip = Get("--slippage") is { } s ? decimal.Parse(s, CultureInfo.InvariantCulture) : null;
+        return new BacktestArgs(symbol, data, qty, slip, $"data/backtest/_sandbox_{symbol}.db");
+    }
+
+    public IEnumerable<KeyValuePair<string, string?>> ConfigOverrides()
+    {
+        var step = Symbol.StartsWith("BTC", StringComparison.OrdinalIgnoreCase) ? "0.00001" : "0.001";
+        var o = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Database"]          = $"Data Source={SandboxDb}",
+            ["Bot:Symbols:0:Symbol"]                = Symbol,
+            ["Bot:Symbols:0:ProviderSymbol"]        = Symbol,
+            ["Bot:Symbols:0:FilePath"]              = DataPath,
+            ["Bot:Symbols:0:QuantityStep"]          = step,
+            ["Bot:Symbols:0:MinNotional"]           = "10.0",
+            ["Bot:StartingQuantity"]                = StartingQty.ToString(CultureInfo.InvariantCulture),
+            ["Bot:StartingCash"]                    = "0",
+            ["Bot:Runtime:LocalPaperExecutionOnly"] = "true",
+            ["Bot:Runtime:StrategyName"]            = "BuildEthCycling",
+            ["Bot:Runtime:AutoStart"]               = "false",
+            ["Optimizer:Enabled"]                   = "false",
+            ["ClaudeAdvisor:Enabled"]               = "false",
+            ["Notifications:Enabled"]               = "false",
+        };
+        if (Slippage is { } sl) o["Bot:SlippagePercent"] = sl.ToString(CultureInfo.InvariantCulture);
+        return o;
+    }
+}

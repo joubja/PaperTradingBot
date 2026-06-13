@@ -14,12 +14,11 @@ public class LiveDemoRuntime : ITradingRuntime
     private readonly IBarAggregationService _barAggregationService;
     private ILocalPaperExecutionGateway? _executionGateway;
     private readonly IBarDecisionPipeline _barDecisionPipeline;
-    private readonly IRiskManager _riskManager;
     private readonly IPositionSizer _positionSizer;
-    private readonly IOrderValidationService _orderValidationService;
     private readonly AnalyticsService _analyticsService;
     private readonly ISessionResultRecorder _sessionResultRecorder;
     private readonly IPortfolioStateStore _portfolioStateStore;
+    private readonly BarProcessor _barProcessor;
 
     private readonly BotStateService _botState;
     private readonly DatabaseService _db;
@@ -28,10 +27,12 @@ public class LiveDemoRuntime : ITradingRuntime
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private string _sessionId = "";
 
+    // Per-bar execution context shared with BarProcessor (built in RunAsync once the gateway exists).
+    private BarSession? _barSession;
+
     private readonly Dictionary<string, decimal> _lastPriceBySymbol =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private bool    _positionSeeded;
     private bool    _resumeMode;
     private decimal _sessionStartingEth;
 
@@ -55,12 +56,11 @@ public class LiveDemoRuntime : ITradingRuntime
         ITradingProviderFactory providerFactory,
         IBarAggregationService barAggregationService,
         IBarDecisionPipeline barDecisionPipeline,
-        IRiskManager riskManager,
         IPositionSizer positionSizer,
-        IOrderValidationService orderValidationService,
         AnalyticsService analyticsService,
         ISessionResultRecorder sessionResultRecorder,
         IPortfolioStateStore portfolioStateStore,
+        BarProcessor barProcessor,
         BotStateService botState,
         DatabaseService db)
     {
@@ -69,12 +69,11 @@ public class LiveDemoRuntime : ITradingRuntime
         _providerFactory = providerFactory;
         _barAggregationService = barAggregationService;
         _barDecisionPipeline = barDecisionPipeline;
-        _riskManager = riskManager;
         _positionSizer = positionSizer;
-        _orderValidationService = orderValidationService;
         _analyticsService = analyticsService;
         _sessionResultRecorder = sessionResultRecorder;
         _portfolioStateStore = portfolioStateStore;
+        _barProcessor = barProcessor;
         _botState = botState;
         _db = db;
     }
@@ -87,10 +86,17 @@ public class LiveDemoRuntime : ITradingRuntime
 
         InitialiseState();
 
-        // _positionSeeded is set here rather than inside InitialiseState so the intent is
-        // explicit: resume mode means BotController already rebuilt the portfolio from DB trades,
-        // so the first-bar seed must be skipped. Fresh-start mode seeds on the first live bar.
-        _positionSeeded = _resumeMode;
+        // Build the per-bar execution context. PositionSeeded starts true in resume mode
+        // (BotController already rebuilt the portfolio from DB trades, so the first-bar seed
+        // must be skipped); fresh-start mode seeds on the first live bar.
+        _barSession = new BarSession
+        {
+            Gateway            = _executionGateway!,
+            SessionId          = _sessionId,
+            LastPriceBySymbol  = _lastPriceBySymbol,
+            PositionSeeded     = _resumeMode,
+            SessionStartingEth = _sessionStartingEth
+        };
         if (_resumeMode)
         {
             _resumeMode = false;
@@ -234,229 +240,9 @@ public class LiveDemoRuntime : ITradingRuntime
                 return;
             }
 
-            var candle = ToCandle(bar);
-            _botState.NotifyBar(candle);
-
-            // Seed starting ETH position at real market price on first bar so avgEntry is correct.
-            // Use the session-specific starting ETH (from wallet) if set, otherwise fall back to config.
-            var seedEth = _sessionStartingEth > 0m ? _sessionStartingEth : _options.StartingQuantity;
-            if (!_positionSeeded && seedEth > 0m)
-            {
-                var primarySym = _options.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT";
-                _portfolioStateStore.SeedPosition(primarySym, seedEth, candle.Close);
-                _positionSeeded = true;
-                _logger.LogInformation(
-                    "SEEDED | {Qty} {Symbol} @ {Price:F4} (first bar close)",
-                    seedEth, primarySym, candle.Close);
-            }
-            _sessionResultRecorder.RecordCandle(symbol, candle);
-            _lastPriceBySymbol[symbol] = candle.Close;
-
-            var currentEquity = _portfolioStateStore.GetTotalEquity(_lastPriceBySymbol);
-            var currentSymbolMarketValue = _portfolioStateStore.GetPositionMarketValue(symbol, candle.Close);
-
-            var decision = await _barDecisionPipeline.ProcessClosedBarAsync(
-                symbol,
-                candle,
-                _lastPriceBySymbol,
-                currentEquity,
-                currentSymbolMarketValue,
-                cancellationToken);
-
-            _logger.LogInformation(
-                "BAR DECISION | Symbol={Symbol} Price={Price:F2} Status={Status} HistoryCount={HistoryCount} Reason={Reason}",
-                decision.Symbol,
-                candle.Close,
-                decision.Status,
-                decision.HistoryCount,
-                decision.Reason);
-
-            if (!decision.IsReady || decision.Intent is null)
-            {
-                // Roll back any in-memory sell state committed by GetIntent() before the pipeline ran.
-                // No DB cleanup needed here — the cycle row is only written after pipeline approval.
-                if (decision.Status == BarDecisionStatus.Rejected &&
-                    decision.Intent?.IntentType == OrderIntentType.Sell)
-                {
-                    _barDecisionPipeline.Strategy.RollbackSell(symbol, decision.Reason);
-                    _logger.LogWarning(
-                        "SELL REJECTED BY PIPELINE | Symbol={Symbol} reason={Reason}",
-                        symbol, decision.Reason);
-                }
-                RecordEquityPoint(candle.Timestamp);
-                return;
-            }
-
-            var symbolConfig = GetSymbolConfig(symbol);
-
-            var quantity = decision.Intent.TargetQuantityOverride ?? (
-                decision.Intent.IntentType == OrderIntentType.Buy
-                    ? _positionSizer.GetBuyQuantity(
-                        _portfolioStateStore.GetCash(),
-                        candle.Close,
-                        decision.CurrentEquity,
-                        symbolConfig)
-                    : _positionSizer.GetSellQuantity(
-                        _portfolioStateStore.GetPositionQuantity(symbol),
-                        symbolConfig));
-
-            _logger.LogInformation(
-                "SIZING | Symbol={Symbol} IntentType={IntentType} Qty={Qty:F4} Cash={Cash:F2} Equity={Equity:F2}",
-                symbol,
-                decision.Intent.IntentType,
-                quantity,
-                _portfolioStateStore.GetCash(),
-                decision.CurrentEquity);
-
-            var qtyValidation = _orderValidationService.ValidateExecutionQuantity(quantity, candle.Close, symbolConfig, symbol);
-            if (!qtyValidation.IsValid)
-            {
-                _logger.LogWarning(
-                    "QTY VALIDATION FAILED | Symbol={Symbol} Errors={Errors}",
-                    symbol,
-                    qtyValidation.ToSingleMessage());
-
-                if (decision.Intent.IntentType == OrderIntentType.Sell)
-                    _barDecisionPipeline.Strategy.RollbackSell(symbol, $"qty validation: {qtyValidation.ToSingleMessage()}");
-
-                RecordEquityPoint(candle.Timestamp);
-                return;
-            }
-
-            // Commit cycle sell to DB only after both pipeline and qty validation approve.
-            // This ensures no phantom cycle rows are created when a sell is blocked or invalid.
-            if (decision.Intent.IntentType == OrderIntentType.Sell && !string.IsNullOrEmpty(_sessionId))
-            {
-                var cycleId = _barDecisionPipeline.Strategy.CommitSellToDB(symbol, _sessionId);
-                if (cycleId.HasValue)
-                    decision.Intent.CycleId = cycleId;
-            }
-
-            var request = new DemoOrderRequest
-            {
-                Symbol = symbol,
-                Side = decision.Intent.IntentType == OrderIntentType.Buy ? "Buy" : "Sell",
-                Quantity = quantity,
-                ReferencePrice = candle.Close,
-                LimitPrice = decision.Intent.LimitPrice,
-                StopPrice = decision.Intent.StopPrice,
-                Reason = $"{decision.Intent.OrderType} | {decision.Intent.TimeInForce} | {decision.Intent.Reason}"
-            };
-
-            _logger.LogInformation(
-                "LOCAL PAPER REQUEST | Symbol={Symbol} Side={Side} Qty={Qty:F4} RefPrice={RefPrice:F4} Reason={Reason}",
-                request.Symbol,
-                request.Side,
-                request.Quantity,
-                request.ReferencePrice,
-                request.Reason);
-
-            var fill = await _executionGateway!.SubmitSimulatedOrderAsync(request, cancellationToken);
-
-            if (!fill.Accepted)
-            {
-                _logger.LogWarning(
-                    "LOCAL PAPER REJECTED | Symbol={Symbol} Side={Side} Qty={Qty:F4} Reason={Reason}",
-                    request.Symbol,
-                    request.Side,
-                    request.Quantity,
-                    fill.RejectionReason ?? "Unknown rejection");
-
-                if (decision.Intent.CycleId.HasValue && !string.IsNullOrEmpty(_sessionId))
-                {
-                    _db.DeleteCycleRow(decision.Intent.CycleId.Value);
-                    _logger.LogWarning("CYCLE ROW DELETED | CycleId={Id} — fill rejected, cycle row removed",
-                        decision.Intent.CycleId.Value);
-                }
-
-                if (decision.Intent.IntentType == OrderIntentType.Sell)
-                    _barDecisionPipeline.Strategy.RollbackSell(symbol, $"gateway rejected: {fill.RejectionReason ?? "unknown"}");
-
-                RecordEquityPoint(candle.Timestamp);
-                return;
-            }
-
-            // [C-3] Write trade to DB FIRST, before applying to the in-memory portfolio.
-            // If the process crashes after the DB write but before memory apply, the trade
-            // is replayed correctly on resume. The old order (memory → DB) lost trades
-            // permanently when a crash occurred in that window.
-            if (!string.IsNullOrEmpty(_sessionId))
-            {
-                var tradeSide   = decision.Intent.IntentType == OrderIntentType.Buy ? TradeSide.Buy : TradeSide.Sell;
-                // For sells, estimate PnL from current avgEntry (same formula as TryApplySellFill).
-                // For buys, realizedPnL is always 0.
-                var estimatedPnL = 0m;
-                if (tradeSide == TradeSide.Sell)
-                {
-                    var avgEntry   = _portfolioStateStore.GetAverageEntryPrice(symbol);
-                    var netProc    = fill.FillPrice * fill.FilledQuantity - fill.Commission;
-                    estimatedPnL   = netProc - (avgEntry * fill.FilledQuantity);
-                }
-
-                var dbTrade = new Trade
-                {
-                    Timestamp   = fill.TimestampUtc,
-                    Symbol      = symbol,
-                    Side        = tradeSide,
-                    Quantity    = fill.FilledQuantity,
-                    Price       = fill.FillPrice,
-                    Commission  = fill.Commission,
-                    RealizedPnL = estimatedPnL,
-                    Note        = fill.Reason
-                };
-
-                try
-                {
-                    _db.InsertTrade(_sessionId, dbTrade);
-                }
-                catch (Exception dbEx)
-                {
-                    // If the DB write fails, do NOT apply to memory — the portfolio and DB
-                    // must stay in sync. The operator must investigate and recover manually.
-                    _logger.LogCritical(dbEx,
-                        "DB_TRADE_WRITE_FAILED | MANUAL RECOVERY REQUIRED | " +
-                        "Symbol={Symbol} Side={Side} Qty={Qty:F5} Price={Price:F4} Ts={Ts:u}",
-                        fill.Symbol, fill.Side, fill.FilledQuantity, fill.FillPrice, fill.TimestampUtc);
-                    RecordEquityPoint(candle.Timestamp);
-                    return;
-                }
-            }
-
-            var applied = ApplyFillAndRecordTrade(symbol, decision.Intent, fill);
-            if (!applied)
-            {
-                // DB record was written but portfolio rejected the apply — CRITICAL inconsistency.
-                // The trade will be replayed on next resume so the portfolio will self-correct,
-                // but alert immediately for manual review.
-                _logger.LogCritical(
-                    "PORTFOLIO_APPLY_FAILED | DB trade written but portfolio rejected — inconsistency! " +
-                    "Symbol={Symbol} Side={Side} Qty={Qty:F4}. Will self-correct on next resume.",
-                    fill.Symbol, fill.Side, fill.FilledQuantity);
-                RecordEquityPoint(candle.Timestamp);
-                return;
-            }
-
-            // Notify state with actual trade (which has the real RealizedPnL from TryApplySellFill).
-            var lastTrade = _sessionResultRecorder.GetLastTrade();
-            if (lastTrade is not null)
-                _botState.NotifyTrade(lastTrade);
-
-            _riskManager.RegisterExecutedTrade(
-                DateOnly.FromDateTime(candle.Timestamp),
-                symbol,
-                decision.HistoryCount);
-
-            _logger.LogInformation(
-                "LOCAL PAPER EXECUTED | Symbol={Symbol} Side={Side} Qty={Qty:F4} Fill={Fill:F4} Comm={Comm:F2} Cash={Cash:F2} Equity={Equity:F2}",
-                fill.Symbol,
-                fill.Side,
-                fill.FilledQuantity,
-                fill.FillPrice,
-                fill.Commission,
-                _portfolioStateStore.GetCash(),
-                _portfolioStateStore.GetTotalEquity(_lastPriceBySymbol));
-
-            RecordEquityPoint(candle.Timestamp);
+            // All per-bar decision/execution/recording logic lives in the shared BarProcessor
+            // so the live path and the backtest replay path run identical code (no drift).
+            await _barProcessor.ProcessBarAsync(ToCandle(bar), symbol, _barSession!, cancellationToken);
         }
         finally
         {
@@ -658,110 +444,6 @@ public class LiveDemoRuntime : ITradingRuntime
         {
             _stateLock.Release();
         }
-    }
-
-    private bool ApplyFillAndRecordTrade(string symbol, OrderIntent intent, LocalPaperFillResult fill)
-    {
-        if (intent.IntentType == OrderIntentType.Buy)
-        {
-            if (!_portfolioStateStore.TryApplyBuyFill(
-                    symbol,
-                    fill.FilledQuantity,
-                    fill.FillPrice,
-                    fill.Commission,
-                    out var rejection))
-            {
-                _logger.LogWarning(
-                    "BUY APPLY REJECTED | Symbol={Symbol} Reason={Reason}",
-                    symbol,
-                    rejection ?? "Unknown");
-
-                return false;
-            }
-
-            _sessionResultRecorder.RecordTrade(new Trade
-            {
-                Timestamp = fill.TimestampUtc,
-                Symbol = symbol,
-                Side = TradeSide.Buy,
-                Quantity = fill.FilledQuantity,
-                Price = fill.FillPrice,
-                Commission = fill.Commission,
-                RealizedPnL = 0m,
-                Note = fill.Reason
-            });
-
-            // Correct the pre-execution estimated qty in the cycle DB record with the actual
-            // fill, capped at what the cycle's own sell proceeds could repurchase — the fill
-            // may include redeployed abandon cash that is not this cycle's gain.
-            if (intent.CycleId.HasValue && !string.IsNullOrEmpty(_sessionId))
-            {
-                var attributedQty = intent.CycleBuyQtyCap.HasValue
-                    ? Math.Min(fill.FilledQuantity, intent.CycleBuyQtyCap.Value)
-                    : fill.FilledQuantity;
-                _db.CorrectCycleBuyQty(intent.CycleId.Value, attributedQty, fill.FillPrice);
-            }
-
-            return true;
-        }
-
-        if (intent.IntentType == OrderIntentType.Sell)
-        {
-            if (!_portfolioStateStore.TryApplySellFill(
-                    symbol,
-                    fill.FilledQuantity,
-                    fill.FillPrice,
-                    fill.Commission,
-                    out var realizedPnL,
-                    out var rejection))
-            {
-                _logger.LogWarning(
-                    "SELL APPLY REJECTED | Symbol={Symbol} Reason={Reason}",
-                    symbol,
-                    rejection ?? "Unknown");
-
-                return false;
-            }
-
-            _sessionResultRecorder.RecordTrade(new Trade
-            {
-                Timestamp = fill.TimestampUtc,
-                Symbol = symbol,
-                Side = TradeSide.Sell,
-                Quantity = fill.FilledQuantity,
-                Price = fill.FillPrice,
-                Commission = fill.Commission,
-                RealizedPnL = realizedPnL,
-                Note = fill.Reason
-            });
-
-            return true;
-        }
-
-        return false;
-    }
-
-    private void RecordEquityPoint(DateTime timestampUtc)
-    {
-        var equity = _portfolioStateStore.GetTotalEquity(_lastPriceBySymbol);
-        var point  = new EquityPoint { Timestamp = timestampUtc, Equity = equity };
-
-        _sessionResultRecorder.RecordEquityPoint(
-            point,
-            exposed: _portfolioStateStore.GetTotalMarketValue(_lastPriceBySymbol) > 0m);
-
-        var ethQty = _portfolioStateStore.GetPositionQuantity(_options.Symbols.FirstOrDefault()?.Symbol ?? "ETHUSDT");
-        var positions = _portfolioStateStore
-            .GetPortfolioSnapshot().Positions
-            .ToDictionary(
-                p => p.Key,
-                p => (p.Value.Quantity, p.Value.AverageEntryPrice),
-                StringComparer.OrdinalIgnoreCase);
-
-        if (!string.IsNullOrEmpty(_sessionId))
-            _db.InsertEquityPoint(_sessionId, timestampUtc, equity, ethQty);
-
-        _botState.NotifyBarUpdate(point, ethQty, _portfolioStateStore.GetCash(), equity, positions);
     }
 
     private async Task EmitLiveDemoSummaryAsync(CancellationToken cancellationToken = default)

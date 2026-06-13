@@ -23,6 +23,10 @@
 
 	<ItemGroup>
 		<Compile Remove="DbQuery.cs" />
+		<!-- Standalone backtest data tooling — its own console project, excluded from the web app build. -->
+		<Compile Remove="tools\**\*.cs" />
+		<Content Remove="tools\**" />
+		<None Remove="tools\**" />
 	</ItemGroup>
 
 	<ItemGroup>
