@@ -75,6 +75,9 @@ $SSH bash -s <<REMOTE
   echo "  Extracting..."
   sudo tar -xzf /tmp/paperbot-deploy.tar.gz -C $INSTALL_DIR
   sudo chown -R $SERVICE_USER:$SERVICE_USER $INSTALL_DIR
+  # Static assets are served directly; Windows-packed dirs can land as 0700 and
+  # break static file serving (blank ApexCharts dashboard). Force world read/traverse.
+  sudo chmod -R a+rX $INSTALL_DIR/wwwroot
   rm -f /tmp/paperbot-deploy.tar.gz
 
   echo "  Starting service..."

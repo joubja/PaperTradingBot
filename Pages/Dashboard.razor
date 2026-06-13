@@ -173,7 +173,9 @@
 
     <!-- ── Metric cards ─────────────────────────────────────────────────── -->
     @{
-        var livePrice = State.RecentCandles.LastOrDefault()?.Close ?? 0m;
+        var livePrice       = State.RecentCandles.LastOrDefault()?.Close ?? 0m;
+        var allTimeCcy      = Db.GetTotalCycleEthGainAllSessions();
+        var allTimeUsdValue = livePrice * allTimeCcy;
     }
     <MudGrid Class="mb-4">
         @foreach (var m in GetMetrics())
@@ -193,6 +195,17 @@
                 </div>
                 <div style="font-size:0.72rem;color:@priceColor;text-transform:uppercase;letter-spacing:1px;margin-top:4px;opacity:0.7;">
                     @BaseCurrency Price
+                </div>
+            </div>
+        </MudItem>
+        <MudItem xs="6" sm="4" md="2">
+            @{ var atColor = allTimeUsdValue >= 0m ? "#00e676" : "#f44336"; }
+            <div style="background:#12121a;border:2px solid @atColor;border-radius:12px;padding:16px;text-align:center;box-shadow:0 0 18px @(atColor)55;">
+                <div style="font-size:2rem;font-weight:700;line-height:1.2;color:@atColor;letter-spacing:1px;">
+                    @(livePrice > 0m ? $"${allTimeUsdValue:N2}" : "—")
+                </div>
+                <div style="font-size:0.72rem;color:@atColor;text-transform:uppercase;letter-spacing:1px;margin-top:4px;opacity:0.7;">
+                    All-time @BaseCurrency USD
                 </div>
             </div>
         </MudItem>
