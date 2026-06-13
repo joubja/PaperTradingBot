@@ -151,17 +151,32 @@ public sealed class AdvisorContextBuilder
         var armStatus = _bandit.GetArmStatus();
         if (armStatus.Any(a => a.TotalPulls > 0))
         {
-            sb.AppendLine("## Bandit Learning (active arm* | reward/pulls per candidate)");
-            sb.AppendLine("The bandit has tried these arms — avoid reversing its conclusions without new evidence.");
+            sb.AppendLine("## Bandit Learning (per-candidate reward/pulls; * = current arm)");
+            sb.AppendLine("'untried' arms have NO reward data — never cite an untried arm as evidence or treat it as a low score.");
+            sb.AppendLine("A [CONVERGED] marker means the bandit has real evidence for its best value: do NOT change that setting.");
             foreach (var a in armStatus)
             {
                 sb.Append($"  {a.Name,-18}: ");
                 for (var i = 0; i < a.Arms.Length; i++)
                 {
                     var arm = a.Arms[i];
-                    sb.Append($"{arm.Value}:{arm.MeanReward:+0.00;-0.00}/{arm.Pulls}");
+                    sb.Append(arm.Pulls == 0
+                        ? $"{arm.Value}:untried"
+                        : $"{arm.Value}:{arm.MeanReward:+0.00;-0.00}/{arm.Pulls}");
                     if (i == a.ActiveArmIndex) sb.Append('*');
                     if (i < a.Arms.Length - 1) sb.Append("  ");
+                }
+                // Surface the evidence-backed best arm so the advisor stops comparing against
+                // untried arms. Mark [CONVERGED] when there's enough data AND a clear lead,
+                // signalling the advisor to leave that setting alone (prompt enforces this).
+                var tried = a.Arms.Where(x => x.Pulls > 0)
+                                  .OrderByDescending(x => x.MeanReward).ToList();
+                if (tried.Count > 0)
+                {
+                    var best = tried[0];
+                    var lead = tried.Count >= 2 ? best.MeanReward - tried[1].MeanReward : best.MeanReward;
+                    var converged = a.TotalPulls >= 8 && tried.Count >= 2 && lead >= 0.10f;
+                    sb.Append($"   → best: {best.Value}{(converged ? " [CONVERGED]" : "")}");
                 }
                 sb.AppendLine();
             }

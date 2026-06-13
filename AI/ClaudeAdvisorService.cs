@@ -118,6 +118,12 @@ public sealed class ClaudeAdvisorService : IHostedService, IDisposable
         - Omit or null any field you do not want to change.
         - If {{ccy}}/hr is positive and performance looks acceptable, recommend no changes (all nulls).
         - Keep changes small: RSI values ±3, fractions ±0.05, cooldown ±3.
+        - DEFER TO THE BANDIT: if a setting is marked [CONVERGED] in the Bandit Learning section,
+          leave it null — the bandit has direct reward evidence for its best value and you would
+          only undo its convergence. Focus your changes on settings the bandit has little/no data
+          for (e.g. arms shown as 'untried') or on macro problems the bandit can't see.
+        - NEVER justify a change by citing an 'untried' arm or the current live value's reward —
+          only compare arms that actually have pulls.
         - RsiCycleSell must remain > RsiCrossoverMax + 5.
         - RsiDipBuy must remain < RsiCycleSell - 15.
         - MaxAbandonRise must remain > MinAbandonRise + 0.01.

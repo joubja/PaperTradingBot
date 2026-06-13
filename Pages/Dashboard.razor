@@ -675,10 +675,11 @@
             : 0m;
         var ethPerHour = sessionHours > 0.01m ? ethGain / sessionHours : 0m;
 
-        // Exclude exact-zero cycles (old buggy code produced NetEthGain=0 — not meaningful wins or losses)
-        var completed  = State.RecentCycles.Where(c => !c.IsAbandoned && c.NetEthGain != 0m).ToList();
-        var wins       = completed.Count(c => c.IsProfit);
-        var winRateTxt = completed.Count > 0 ? $"{wins}/{completed.Count} ({wins * 100 / completed.Count}%)" : "—";
+        // All-time, window-independent win rate. Denominator counts EVERY completed cycle,
+        // including all abandons (real coin losses) — read straight from the DB so it's
+        // crash-stable and not capped by the RecentCycles window. See GetCycleWinStatsAllSessions.
+        var (winTotal, winCount) = Db.GetCycleWinStatsAllSessions();
+        var winRateTxt = winTotal > 0 ? $"{winCount}/{winTotal} ({winCount * 100 / winTotal}%)" : "—";
 
         var lastComplete = State.RecentCycles
             .Where(c => !c.IsAbandoned)

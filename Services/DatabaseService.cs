@@ -515,6 +515,19 @@ public class DatabaseService : IDisposable
         return result.HasValue ? (decimal)result.Value : 0m;
     }
 
+    /// All-time win rate, window-independent. Denominator = every completed cycle
+    /// (wins + losses + ALL abandons); abandons are real coin losses and count against
+    /// the rate. Reads straight from the DB so it's crash/restart-stable and not capped
+    /// by the in-memory RecentCycles window.
+    public (int Total, int Wins) GetCycleWinStatsAllSessions()
+    {
+        var total = _conn.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM CyclingCycles WHERE IsComplete=1");
+        var wins = _conn.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM CyclingCycles WHERE IsComplete=1 AND IsAbandoned=0 AND NetEthGain>0");
+        return (total, wins);
+    }
+
     public void InsertAdvisorRun(string sessionId, string trigger, string reasoning, string changes)
     {
         _conn.Execute(

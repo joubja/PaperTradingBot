@@ -5,6 +5,8 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<RootNamespace>PaperTradingBot</RootNamespace>
+		<!-- MUD0002: MudBlazor analyzer flags valid attributes (T, Dense, AlignItems) as "illegal lowercase" — noise. -->
+		<NoWarn>$(NoWarn);MUD0002</NoWarn>
 	</PropertyGroup>
 
 	<ItemGroup>

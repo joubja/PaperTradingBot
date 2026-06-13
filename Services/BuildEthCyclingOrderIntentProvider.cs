@@ -68,6 +68,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
     // Adaptive sell/abandon calibration constants (internal, not user-tunable)
     private const decimal ReferenceAtrPct = 0.0002m;  // ~0.02 % per bar = realistic ETH 10s ATR
     private const decimal AbandonAtrScale = 800m;     // tuned for 10-second bars
+    private const decimal RsiPeakConfirmDrop = 2m;    // 1-min RSI must fall ≥ this off the peak before selling (abandon guard)
 
     // Trend filter EMA anchor (structural, not user-tunable)
     private const int TrendEma = 50;                  // ~8 min anchor at 10s bars
@@ -694,9 +695,23 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
         }
 
         // ── Cycling sell trigger ──────────────────────────────────────────────
-        // RSI peak confirmation + cooldown guard.
-        bool sellSignal = _cyclingEnabled && rsi > rsiCycleSell && rsi < rsiPrev
+        // Peak confirmation. A single 1-bar RSI down-tick (rsi < rsiPrev) is too weak —
+        // selling into a momentary RSI breather mid-climb is the dominant source of abandons:
+        // price resumes upward and the cycle rebuys higher = fewer coins. Require BOTH a
+        // decisive RSI roll-off the peak AND short-term price momentum (EMA9 on 10s bars) to
+        // have stopped rising. The EMA9-rollover gate also catches slow grinds that the fast
+        // 10s spread trend filter misses (EMA9 keeps climbing through a slow rise → no sell).
+        var rsiRolledOff   = rsi > rsiCycleSell && (rsiPrev - rsi) >= RsiPeakConfirmDrop;
+        var momentumFading = fastEma <= fastEmaPrev;
+        bool sellSignal = _cyclingEnabled && rsiRolledOff && momentumFading
                           && cs.CooldownBarsLeft == 0;
+
+        // Diagnostic: RSI says peak but EMA9 is still rising — likely a breather in an ongoing
+        // climb. Deferring here is exactly what avoids the large-sell-at-local-high abandon.
+        if (_cyclingEnabled && rsiRolledOff && !momentumFading && cs.CooldownBarsLeft == 0)
+            _logger.LogDebug(
+                "PEAK FILTER | Sell deferred — RSI rolled off {Prev:F1}->{Rsi:F1} but EMA9 still rising ({Fast:F4} > {Prev9:F4})",
+                rsiPrev, rsi, fastEma, fastEmaPrev);
 
         if (sellSignal && strongUptrend)
         {
