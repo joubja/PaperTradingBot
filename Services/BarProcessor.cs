@@ -20,6 +20,9 @@ public sealed class BarSession
     public required Dictionary<string, decimal> LastPriceBySymbol { get; init; }
     public bool    PositionSeeded { get; set; }
     public decimal SessionStartingEth { get; set; }
+    /// <summary>Live persists per-bar equity to the DB (dashboard/history). Backtest skips it
+    /// (190k inserts/run, unused for the edge report) — strategy behaviour is unaffected.</summary>
+    public bool    PersistEquityPoints { get; init; } = true;
 }
 
 /// <summary>
@@ -261,7 +264,7 @@ public sealed class BarProcessor
                 p => (p.Value.Quantity, p.Value.AverageEntryPrice),
                 StringComparer.OrdinalIgnoreCase);
 
-        if (!string.IsNullOrEmpty(session.SessionId))
+        if (session.PersistEquityPoints && !string.IsNullOrEmpty(session.SessionId))
             _db.InsertEquityPoint(session.SessionId, timestampUtc, equity, ethQty);
 
         _botState.NotifyBarUpdate(point, ethQty, _portfolioStateStore.GetCash(), equity, positions);

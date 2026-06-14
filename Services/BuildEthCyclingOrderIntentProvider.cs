@@ -341,7 +341,9 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 // and retry on the next bar rather than silently abandoning the cycle.
                 var rebuyCash     = _portfolio.GetCash();
                 var rebuyStep     = GetSymbolConfig(symbol)?.QuantityStep ?? 0.001m;
-                var feeMultiplier = 1m + _options.TakerFeePercent / 100m;
+                // Buys fill at close*(1+slippage); budget for it (plus fee) so the order fits
+                // in available cash — otherwise the portfolio rejects with insufficient cash.
+                var feeMultiplier = (1m + _options.SlippagePercent) * (1m + _options.TakerFeePercent / 100m);
                 var rebuyQty      = rebuyCash > 0m && close > 0m
                     ? RoundDownToStep(rebuyCash / (close * feeMultiplier), rebuyStep)
                     : 0m;
@@ -563,7 +565,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 var expStep        = GetSymbolConfig(symbol)?.QuantityStep ?? 0.001m;
                 var expCash        = _portfolio.GetCash();
                 var expRebuyQty    = expCash > 0m
-                    ? RoundDownToStep(expCash / (close * (1m + expFeeRate)), expStep)
+                    ? RoundDownToStep(expCash / (close * (1m + _options.SlippagePercent) * (1m + expFeeRate)), expStep)
                     : 0m;
                 // Cash may include residue beyond this abandon's own proceeds — cap attribution.
                 expRebuyQty        = Math.Min(expRebuyQty, OwnProceedsRebuyQty(
@@ -613,7 +615,7 @@ public class BuildEthCyclingOrderIntentProvider : IOrderIntentProvider
                 var rebuyCash = _portfolio.GetCash();
                 var rcvStep   = GetSymbolConfig(symbol)?.QuantityStep ?? 0.001m;
                 var rcvQty    = rebuyCash > 0m && close > 0m
-                    ? RoundDownToStep(rebuyCash / (close * (1m + feeRate)), rcvStep)
+                    ? RoundDownToStep(rebuyCash / (close * (1m + _options.SlippagePercent) * (1m + feeRate)), rcvStep)
                     : 0m;
 
                 // [SM-014-recovery] Check cash BEFORE clearing shadow state.

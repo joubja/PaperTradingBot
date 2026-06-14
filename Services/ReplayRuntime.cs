@@ -77,7 +77,8 @@ public sealed class ReplayRuntime : ITradingRuntime
             SessionId          = sessionId,
             LastPriceBySymbol  = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase),
             PositionSeeded     = false,
-            SessionStartingEth = startQty
+            SessionStartingEth = startQty,
+            PersistEquityPoints = false   // backtest: skip 190k/run equity inserts (unused for the edge report)
         };
 
         Console.WriteLine(
@@ -121,9 +122,12 @@ public sealed class ReplayRuntime : ITradingRuntime
         var evPerCycle  = settled.Count  > 0 ? settled.Average(c => c.NetEthGain)  : 0m;
         var cycleSum    = settled.Sum(c => c.NetEthGain);
 
-        // Ledger truth: coin actually held vs start, plus parked cash from any open cycle.
-        var netCoin     = finalQty - startQty;
+        // Coin-equivalent truth: held coin PLUS parked cash converted at last price. A run that
+        // ends mid-cycle holds the sold fraction as cash — counting only finalQty would massively
+        // overstate the loss (e.g. BTC uptrend looked −51% but is ~−3% once cash is included).
         var cashAsCoin  = lastClose > 0m ? finalCash / lastClose : 0m;
+        var netCoin     = (finalQty + cashAsCoin) - startQty;
+        var netPosOnly  = finalQty - startQty;
 
         Console.WriteLine();
         Console.WriteLine("══════════════════════════════════════════════════════════════");
@@ -138,7 +142,8 @@ public sealed class ReplayRuntime : ITradingRuntime
         Console.WriteLine("  ──────────────────────────────────────────────────────────");
         Console.WriteLine($"  Start held       : {startQty:0.000000} {ccy}");
         Console.WriteLine($"  Final held       : {finalQty:0.000000} {ccy}   (+ ${finalCash:0.00} cash ≈ {cashAsCoin:0.000000} {ccy})");
-        Console.WriteLine($"  ► Net coin       : {netCoin:+0.000000;-0.000000} {ccy}   ({(startQty > 0 ? netCoin / startQty : 0m):+0.00%;-0.00%})");
+        Console.WriteLine($"  Net (pos only)   : {netPosOnly:+0.000000;-0.000000} {ccy}   (mid-cycle cash NOT counted)");
+        Console.WriteLine($"  ► Net coin-equiv : {netCoin:+0.000000;-0.000000} {ccy}   ({(startQty > 0 ? netCoin / startQty : 0m):+0.00%;-0.00%})   ◄ includes parked cash");
         Console.WriteLine("══════════════════════════════════════════════════════════════");
         _logger.LogInformation("REPLAY DONE | session={Session} EV/cycle={EV:+0.000000;-0.000000} {Ccy} netCoin={Net:+0.000000;-0.000000}",
             sessionId, evPerCycle, ccy, netCoin);

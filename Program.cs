@@ -249,7 +249,11 @@ sealed record BacktestArgs(string Symbol, string DataPath, decimal StartingQty, 
         var qty    = decimal.Parse(Get("--starting-qty") ?? throw new ArgumentException("--backtest requires --starting-qty"),
                                    CultureInfo.InvariantCulture);
         decimal? slip = Get("--slippage") is { } s ? decimal.Parse(s, CultureInfo.InvariantCulture) : null;
-        return new BacktestArgs(symbol, data, qty, slip, $"data/backtest/_sandbox_{symbol}.db");
+        // Sandbox DB name includes a run tag (slippage + data file stem) so parallel sweep
+        // runs don't collide on the same file.
+        var stem    = Path.GetFileNameWithoutExtension(data);
+        var slipTag = (Get("--slippage") ?? "def").Replace(".", "p");
+        return new BacktestArgs(symbol, data, qty, slip, $"data/backtest/_sandbox_{stem}_{slipTag}.db");
     }
 
     public IEnumerable<KeyValuePair<string, string?>> ConfigOverrides()
