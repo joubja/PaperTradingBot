@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PaperTradingBot.Config;
 using PaperTradingBot.Interfaces;
+using PaperTradingBot.Models;
 
 namespace PaperTradingBot.Services;
 
@@ -94,8 +96,14 @@ public sealed class ReplayRuntime : ITradingRuntime
             $"start={startQty} {ccy} | slippage={_options.SlippagePercent:P3} fee={_options.TakerFeePercent / 100m:P3}");
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var firstClose = candles[0].Close;
+        var firstClose  = candles[0].Close;
+        var startEquity = startQty * firstClose;
         decimal stratPeak = 0m, stratMaxDD = 0m, bhPeak = 0m, bhMaxDD = 0m;
+
+        // Downsampled equity curve for the Reality Check chart (≈200 pts, both rebased to 100).
+        var curve  = new List<RcCurvePoint>(256);
+        var stride = Math.Max(1, candles.Count / 200);
+
         var n = 0;
         foreach (var candle in candles)
         {
@@ -110,6 +118,9 @@ public sealed class ReplayRuntime : ITradingRuntime
             if (c > bhPeak) bhPeak = c;
             else if (bhPeak > 0m) bhMaxDD = Math.Max(bhMaxDD, (bhPeak - c) / bhPeak);
 
+            if (n % stride == 0 && startEquity > 0m && firstClose > 0m)
+                curve.Add(new RcCurvePoint(candle.Timestamp, eq / startEquity * 100m, c / firstClose * 100m));
+
             if (++n % 20000 == 0)
                 Console.WriteLine($"  … {n:N0}/{candles.Count:N0} bars");
         }
@@ -122,13 +133,56 @@ public sealed class ReplayRuntime : ITradingRuntime
         var finalEquity = _portfolio.GetTotalEquity(session.LastPriceBySymbol);
         _db.EndSession(sessionId, finalEquity);
 
+        var tradeCount = _db.GetSessionTradeCount(sessionId);
         PrintTotalReturnReport(symbol, ccy, startQty, finalQty, finalCash, firstClose, lastClose,
-                               finalEquity, stratMaxDD, bhMaxDD, _db.GetSessionTradeCount(sessionId),
-                               candles.Count, sw.Elapsed);
+                               finalEquity, stratMaxDD, bhMaxDD, tradeCount, candles.Count, sw.Elapsed);
 
         // The coin/cycle EV decomposition is only meaningful for the cycling strategy.
         if (strategyName == "BuildEthCycling")
             PrintEdgeReport(sessionId, symbol, ccy, startQty, finalQty, finalCash, lastClose, candles.Count, sw.Elapsed);
+
+        // Structured result for the Reality Check tool (isolated child-process backtests read this).
+        if (Environment.GetEnvironmentVariable("BACKTEST_OUT_JSON") is { Length: > 0 } jsonPath)
+            WriteJsonResult(jsonPath, strategyName, symbol, candles, firstClose, lastClose,
+                            startEquity, finalEquity, stratMaxDD, bhMaxDD, tradeCount, curve);
+    }
+
+    private void WriteJsonResult(
+        string path, string strategyName, string symbol, IReadOnlyList<Candle> candles,
+        decimal firstClose, decimal lastClose, decimal startEquity, decimal finalEquity,
+        decimal stratMaxDD, decimal bhMaxDD, int tradeCount, IReadOnlyList<RcCurvePoint> curve)
+    {
+        var stratRet = startEquity > 0m ? (finalEquity - startEquity) / startEquity : 0m;
+        var bhRet    = firstClose  > 0m ? (lastClose - firstClose) / firstClose     : 0m;
+        var result = new RealityCheckResult
+        {
+            Strategy            = strategyName,
+            Symbol              = symbol,
+            Dataset             = Path.GetFileNameWithoutExtension(_options.Symbols.FirstOrDefault()?.FilePath ?? ""),
+            StartUtc            = candles[0].Timestamp,
+            EndUtc              = candles[^1].Timestamp,
+            Bars                = candles.Count,
+            StartEquityUsd      = startEquity,
+            FinalEquityUsd      = finalEquity,
+            StrategyReturn      = stratRet,
+            BuyHoldReturn       = bhRet,
+            EdgeReturn          = stratRet - bhRet,
+            StrategyMaxDrawdown = stratMaxDD,
+            BuyHoldMaxDrawdown  = bhMaxDD,
+            TradeCount          = tradeCount,
+            SlippagePercent     = _options.SlippagePercent,
+            TakerFeePercent     = _options.TakerFeePercent,
+            Curve               = curve,
+        };
+        try
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+            _logger.LogInformation("REPLAY | wrote Reality Check JSON → {Path}", path);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "REPLAY | failed to write Reality Check JSON to {Path}", path);
+        }
     }
 
     private void PrintTotalReturnReport(
