@@ -33,6 +33,27 @@ public static class IndicatorMath
         return values.Skip(values.Count - period).Average();
     }
 
+    /// <summary>
+    /// Kaufman Efficiency Ratio over the last <paramref name="period"/> values:
+    /// |net change| / Σ|bar-to-bar change|. Range 0..1 — near 1 = clean directional
+    /// trend, near 0 = choppy back-and-forth. Used as a "trend vs chop" gate.
+    /// Returns 0 if there are fewer than period+1 values or the path length is 0.
+    /// </summary>
+    public static decimal EfficiencyRatio(IReadOnlyList<decimal> values, int period)
+    {
+        if (period <= 0 || values.Count < period + 1)
+            return 0m;
+
+        var start = values.Count - period - 1;
+        var netChange = Math.Abs(values[^1] - values[start]);
+
+        var pathLength = 0m;
+        for (var i = start + 1; i < values.Count; i++)
+            pathLength += Math.Abs(values[i] - values[i - 1]);
+
+        return pathLength > 0m ? netChange / pathLength : 0m;
+    }
+
     public static decimal StdDev(IReadOnlyList<decimal> values)
     {
         if (values.Count < 2)

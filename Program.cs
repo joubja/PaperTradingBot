@@ -82,6 +82,8 @@ services.AddKeyedSingleton<IOrderIntentProvider, DemoOrderIntentProvider>("Demo"
 services.AddKeyedSingleton<IOrderIntentProvider, TechnicalOrderIntentProvider>("Technical");
 services.AddKeyedSingleton<IOrderIntentProvider, BuildEthOrderIntentProvider>("BuildEth");
 services.AddKeyedSingleton<IOrderIntentProvider, BuildEthCyclingOrderIntentProvider>("BuildEthCycling");
+services.AddKeyedSingleton<IOrderIntentProvider, TrendFollowOrderIntentProvider>("TrendFollow");
+services.AddKeyedSingleton<IOrderIntentProvider, ExposureControllerOrderIntentProvider>("ExposureController");
 
 // Default strategy resolved from config (used by BarDecisionPipeline on first boot)
 services.AddSingleton<IOrderIntentProvider>(sp =>
@@ -232,7 +234,7 @@ app.Run();
 // ── Backtest CLI args + sandbox config overrides ──────────────────────────────
 // Usage: dotnet run -- --backtest --symbol ETHUSDT --data data/backtest/ETHUSDT-10s-uptrend.csv
 //                     --starting-qty 1.630248 [--slippage 0.0005]
-sealed record BacktestArgs(string Symbol, string DataPath, decimal StartingQty, decimal? Slippage, string SandboxDb)
+sealed record BacktestArgs(string Symbol, string DataPath, decimal StartingQty, decimal? Slippage, string SandboxDb, string Strategy)
 {
     public static BacktestArgs? TryParse(string[] args)
     {
@@ -249,11 +251,12 @@ sealed record BacktestArgs(string Symbol, string DataPath, decimal StartingQty, 
         var qty    = decimal.Parse(Get("--starting-qty") ?? throw new ArgumentException("--backtest requires --starting-qty"),
                                    CultureInfo.InvariantCulture);
         decimal? slip = Get("--slippage") is { } s ? decimal.Parse(s, CultureInfo.InvariantCulture) : null;
-        // Sandbox DB name includes a run tag (slippage + data file stem) so parallel sweep
+        var strategy  = Get("--strategy") ?? "BuildEthCycling"; // default preserves prior behaviour
+        // Sandbox DB name includes a run tag (strategy + slippage + data file stem) so parallel
         // runs don't collide on the same file.
         var stem    = Path.GetFileNameWithoutExtension(data);
         var slipTag = (Get("--slippage") ?? "def").Replace(".", "p");
-        return new BacktestArgs(symbol, data, qty, slip, $"data/backtest/_sandbox_{stem}_{slipTag}.db");
+        return new BacktestArgs(symbol, data, qty, slip, $"data/backtest/_sandbox_{strategy}_{stem}_{slipTag}.db", strategy);
     }
 
     public IEnumerable<KeyValuePair<string, string?>> ConfigOverrides()
@@ -270,8 +273,12 @@ sealed record BacktestArgs(string Symbol, string DataPath, decimal StartingQty, 
             ["Bot:StartingQuantity"]                = StartingQty.ToString(CultureInfo.InvariantCulture),
             ["Bot:StartingCash"]                    = "0",
             ["Bot:Runtime:LocalPaperExecutionOnly"] = "true",
-            ["Bot:Runtime:StrategyName"]            = "BuildEthCycling",
+            ["Bot:Runtime:StrategyName"]            = Strategy,
             ["Bot:Runtime:AutoStart"]               = "false",
+            // A long-hold trend-follower must not be throttled by the per-trade cooldown or the
+            // daily trade cap (0 disables MaxTradesPerDay). The strategy has its own min-hold guard.
+            ["Bot:Risk:CooldownBarsAfterTrade"]     = "0",
+            ["Bot:Risk:MaxTradesPerDay"]            = "0",
             ["Optimizer:Enabled"]                   = "false",
             ["ClaudeAdvisor:Enabled"]               = "false",
             ["Notifications:Enabled"]               = "false",

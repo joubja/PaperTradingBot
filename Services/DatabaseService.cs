@@ -208,6 +208,9 @@ public class DatabaseService : IDisposable
         return (total, wins);
     }
 
+    public int GetSessionTradeCount(string sessionId) =>
+        _conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Trades WHERE SessionId=@id", new { id = sessionId });
+
     public List<Trade> GetSessionTrades(string sessionId)
     {
         return _conn.Query(

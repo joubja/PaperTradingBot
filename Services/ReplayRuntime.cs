@@ -63,10 +63,18 @@ public sealed class ReplayRuntime : ITradingRuntime
             return;
         }
 
-        var sessionId = _db.StartSession("BuildEthCycling", 0m, startQty);
+        // Out-of-sample windowing for walk-forward: BACKTEST_SKIP/BACKTEST_TAKE slice the bar
+        // stream so disjoint sub-windows of one file can be run as separate invocations.
+        if (int.TryParse(Environment.GetEnvironmentVariable("BACKTEST_SKIP"), out var skip) && skip > 0)
+            candles = candles.Skip(skip).ToList();
+        if (int.TryParse(Environment.GetEnvironmentVariable("BACKTEST_TAKE"), out var take) && take > 0)
+            candles = candles.Take(take).ToList();
+
+        var strategyName = _options.Runtime.StrategyName;
+        var sessionId = _db.StartSession(strategyName, 0m, startQty);
         // Set ActiveSessionId exactly as the live path does — the strategy's cycle-DB lifecycle
         // (mark-abandoned, settle, suspension reads) is guarded on _state.ActiveSessionId.
-        _botState.NotifyStarted("BuildEthCycling", sessionId, 0m, startQty, symbol);
+        _botState.NotifyStarted(strategyName, sessionId, 0m, startQty, symbol);
         _portfolio.Reset(0m);
         _recorder.Reset(0m);
         _pipeline.Reset(new[] { symbol });
@@ -86,11 +94,22 @@ public sealed class ReplayRuntime : ITradingRuntime
             $"start={startQty} {ccy} | slippage={_options.SlippagePercent:P3} fee={_options.TakerFeePercent / 100m:P3}");
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
+        var firstClose = candles[0].Close;
+        decimal stratPeak = 0m, stratMaxDD = 0m, bhPeak = 0m, bhMaxDD = 0m;
         var n = 0;
         foreach (var candle in candles)
         {
             if (cancellationToken.IsCancellationRequested) break;
             await _barProcessor.ProcessBarAsync(candle, symbol, session, cancellationToken);
+
+            // Incremental max-drawdown (no per-bar DB writes): strategy equity vs buy-and-hold (close).
+            var eq = _portfolio.GetTotalEquity(session.LastPriceBySymbol);
+            if (eq > stratPeak) stratPeak = eq;
+            else if (stratPeak > 0m) stratMaxDD = Math.Max(stratMaxDD, (stratPeak - eq) / stratPeak);
+            var c = candle.Close;
+            if (c > bhPeak) bhPeak = c;
+            else if (bhPeak > 0m) bhMaxDD = Math.Max(bhMaxDD, (bhPeak - c) / bhPeak);
+
             if (++n % 20000 == 0)
                 Console.WriteLine($"  … {n:N0}/{candles.Count:N0} bars");
         }
@@ -98,11 +117,44 @@ public sealed class ReplayRuntime : ITradingRuntime
 
         var lastClose = candles[^1].Close;
         session.LastPriceBySymbol[symbol] = lastClose;
-        var finalQty   = _portfolio.GetPositionQuantity(symbol);
-        var finalCash  = _portfolio.GetCash();
-        _db.EndSession(sessionId, _portfolio.GetTotalEquity(session.LastPriceBySymbol));
+        var finalQty    = _portfolio.GetPositionQuantity(symbol);
+        var finalCash   = _portfolio.GetCash();
+        var finalEquity = _portfolio.GetTotalEquity(session.LastPriceBySymbol);
+        _db.EndSession(sessionId, finalEquity);
 
-        PrintEdgeReport(sessionId, symbol, ccy, startQty, finalQty, finalCash, lastClose, candles.Count, sw.Elapsed);
+        PrintTotalReturnReport(symbol, ccy, startQty, finalQty, finalCash, firstClose, lastClose,
+                               finalEquity, stratMaxDD, bhMaxDD, _db.GetSessionTradeCount(sessionId),
+                               candles.Count, sw.Elapsed);
+
+        // The coin/cycle EV decomposition is only meaningful for the cycling strategy.
+        if (strategyName == "BuildEthCycling")
+            PrintEdgeReport(sessionId, symbol, ccy, startQty, finalQty, finalCash, lastClose, candles.Count, sw.Elapsed);
+    }
+
+    private void PrintTotalReturnReport(
+        string symbol, string ccy, decimal startQty, decimal finalQty, decimal finalCash,
+        decimal firstClose, decimal lastClose, decimal finalEquity,
+        decimal stratMaxDD, decimal bhMaxDD, int tradeCount, int bars, TimeSpan elapsed)
+    {
+        var startEquity = startQty * firstClose;
+        var bhEquity    = startQty * lastClose;
+        var stratRet    = startEquity > 0m ? (finalEquity - startEquity) / startEquity : 0m;
+        var bhRet       = firstClose  > 0m ? (lastClose - firstClose) / firstClose     : 0m;
+
+        Console.WriteLine();
+        Console.WriteLine("══════════════════════════════════════════════════════════════");
+        Console.WriteLine($"  TOTAL-RETURN REPORT — {symbol} [{_options.Runtime.StrategyName}]   ({bars:N0} bars, {elapsed.TotalSeconds:F1}s)");
+        Console.WriteLine("══════════════════════════════════════════════════════════════");
+        Console.WriteLine($"  Start equity   : ${startEquity:N2}   ({startQty:0.######} {ccy} @ ${firstClose:N2})");
+        Console.WriteLine($"  Final equity   : ${finalEquity:N2}   ({finalQty:0.######} {ccy} + ${finalCash:N2} cash)");
+        Console.WriteLine($"  ► Strategy ret  : {stratRet:+0.00%;-0.00%}    maxDD {stratMaxDD:P2}");
+        Console.WriteLine("  ──────────────────────────────────────────────────────────");
+        Console.WriteLine($"  Buy & hold ret : {bhRet:+0.00%;-0.00%}    maxDD {bhMaxDD:P2}   (${bhEquity:N2})");
+        Console.WriteLine($"  ► Edge vs B&H   : {(stratRet - bhRet):+0.00%;-0.00%} return   /   {(bhMaxDD - stratMaxDD):+0.00%;-0.00%} drawdown saved");
+        Console.WriteLine($"  Switches       : {tradeCount} trades (~{tradeCount / 2} round trips)");
+        Console.WriteLine("══════════════════════════════════════════════════════════════");
+        _logger.LogInformation("REPLAY DONE | {Strat} {Symbol} ret={Ret:+0.00%;-0.00%} bh={Bh:+0.00%;-0.00%} edge={Edge:+0.00%;-0.00%} trades={Tr}",
+            _options.Runtime.StrategyName, symbol, stratRet, bhRet, stratRet - bhRet, tradeCount);
     }
 
     private void PrintEdgeReport(
