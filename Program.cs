@@ -53,6 +53,9 @@ services.AddRazorPages();
 services.AddServerSideBlazor();
 services.AddMudServices();
 
+// Public "Reality Check" page — loads precomputed backtest results (wwwroot/reality-check).
+services.AddSingleton<RealityCheckService>();
+
 // ── Infrastructure ────────────────────────────────────────────────────────────
 services.AddSingleton<DatabaseService>();
 services.AddSingleton<BinanceAccountService>();

@@ -1,0 +1,163 @@
+@page "/reality-check"
+@using Color = MudBlazor.Color
+@using Size = MudBlazor.Size
+@inject RealityCheckService RC
+
+<PageTitle>Reality Check — can you beat just holding?</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-6">
+
+    <MudText Typo="Typo.h3" Class="mb-1" Style="font-weight:700;">Reality Check</MudText>
+    <MudText Typo="Typo.h6" Class="mb-4" Style="color:#9aa0b5;font-weight:400;">
+        We tried hard to beat <b>just holding</b> on Binance. Here's what really happened — on real data, after fees.
+    </MudText>
+
+    @if (!RC.HasData)
+    {
+        <MudAlert Severity="Severity.Warning">No results loaded yet.</MudAlert>
+    }
+    else
+    {
+        <!-- Controls -->
+        <MudPaper Elevation="0" Class="pa-4 mb-4 d-flex align-center flex-wrap gap-4"
+                  Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+            <div>
+                <MudText Typo="Typo.caption" Style="color:#9aa0b5;">Coin</MudText>
+                <MudButtonGroup OverrideStyles="false" Class="d-flex gap-2">
+                    @foreach (var c in RC.Coins)
+                    {
+                        <MudButton Variant="@(_coin == c ? Variant.Filled : Variant.Outlined)"
+                                   Color="Color.Primary" Size="Size.Small" OnClick="@(() => SelectCoin(c))">
+                            @RealityCheckService.CoinLabel(c)
+                        </MudButton>
+                    }
+                </MudButtonGroup>
+            </div>
+            <MudSelect T="string" Label="Strategy" @bind-Value="_strategy" @bind-Value:after="OnStrategyChanged"
+                       Dense="true" Style="min-width:340px;">
+                @foreach (var s in RC.Strategies)
+                {
+                    <MudSelectItem Value="@s">@RealityCheckService.StrategyLabel(s)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudPaper>
+
+        <!-- Verdict -->
+        @if (_rows.Count > 0)
+        {
+            <MudAlert Severity="@(_worse >= _rows.Count - _worse ? Severity.Error : Severity.Success)"
+                      Variant="Variant.Outlined" Class="mb-4">
+                <b>@RealityCheckService.StrategyLabel(_strategy)</b> on @RealityCheckService.CoinLabel(_coin):
+                underperformed simply holding in <b>@_worse of @_rows.Count</b> tested market conditions
+                (after a realistic @($"{_rows[0].SlippagePercent:P3}") slippage + @($"{_rows[0].TakerFeePercent:0.##}%") fee per trade).
+            </MudAlert>
+
+            <!-- Regime cards -->
+            <div class="d-flex flex-wrap gap-3 mb-4">
+                @foreach (var r in _rows)
+                {
+                    var sel = ReferenceEquals(r, _selected);
+                    var border = sel ? "#7c5cff" : "#1e1e2e";
+                    <MudPaper Elevation="0" @onclick="@(() => _selected = r)"
+                              Style="@($"cursor:pointer;min-width:230px;flex:1;padding:14px;border-radius:12px;background:#12121a;border:1px solid {border};")">
+                        <MudText Typo="Typo.subtitle2" Style="color:#c8cce0;">@RealityCheckService.RegimeLabel(r.Dataset)</MudText>
+                        <MudText Typo="Typo.h5" Style="@($"font-weight:700;color:{EdgeColor(r.EdgeReturn)};")">
+                            @SignPct(r.EdgeReturn) <span style="font-size:0.6em;color:#9aa0b5;">vs holding</span>
+                        </MudText>
+                        <MudText Typo="Typo.body2" Style="color:#9aa0b5;">
+                            strategy @SignPct(r.StrategyReturn) &nbsp;·&nbsp; hold @SignPct(r.BuyHoldReturn)
+                        </MudText>
+                        <MudText Typo="Typo.caption" Style="color:#6b7088;">
+                            @r.TradeCount trades · worst drop @($"{r.StrategyMaxDrawdown:P0}")
+                        </MudText>
+                    </MudPaper>
+                }
+            </div>
+
+            <!-- Chart -->
+            @if (_selected is not null)
+            {
+                <MudPaper Elevation="0" Class="pa-4 mb-4"
+                          Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">
+                        @RealityCheckService.RegimeLabel(_selected.Dataset) — $100 invested, strategy vs holding
+                    </MudText>
+                    <ApexChart TItem="RcCurvePoint" Options="_opts" Height="320" @key="@($"{_coin}{_strategy}{_selected.Dataset}")">
+                        <ApexPointSeries TItem="RcCurvePoint" Items="_selected.Curve" Name="Just holding"
+                                         SeriesType="SeriesType.Line"
+                                         XValue="@(p => (IConvertible)new DateTimeOffset(p.T, TimeSpan.Zero).ToUnixTimeMilliseconds())"
+                                         YValue="@(p => p.BuyHold)" />
+                        <ApexPointSeries TItem="RcCurvePoint" Items="_selected.Curve" Name="This strategy"
+                                         SeriesType="SeriesType.Line"
+                                         XValue="@(p => (IConvertible)new DateTimeOffset(p.T, TimeSpan.Zero).ToUnixTimeMilliseconds())"
+                                         YValue="@(p => p.Strategy)" />
+                    </ApexChart>
+                </MudPaper>
+            }
+        }
+
+        <!-- Honest takeaway + donation -->
+        <MudPaper Elevation="0" Class="pa-4"
+                  Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
+            <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight:600;">Why we're giving this away</MudText>
+            <MudText Typo="Typo.body2" Style="color:#9aa0b5;" Class="mb-3">
+                We're not selling signals, courses, or a "profitable bot." Almost every prediction strategy we
+                tested lost to simply holding once you pay real fees. The boring options — hold, dollar-cost-average,
+                and (if you want yield without gambling on direction) transparent market-neutral carry — are the ones
+                that survive the data.
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mb-1">
+                If this saved you money or a bad idea and you'd like to say thanks (never expected):
+            </MudText>
+            <MudText Typo="Typo.body1" Style="font-family:monospace;color:#7c5cff;">
+                ETH / any EVM token: @DonationAddress
+            </MudText>
+            <MudText Typo="Typo.caption" Style="color:#6b7088;" Class="mt-3 d-block">
+                Educational analysis of historical data — not financial advice. Past results don't predict the future.
+            </MudText>
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    // TODO: replace with the project owner's real ETH wallet before publishing.
+    private const string DonationAddress = "<ETH address pending>";
+
+    private string _coin = "BTCUSDT";
+    private string _strategy = "Technical";
+    private RealityCheckResult? _selected;
+    private IReadOnlyList<RealityCheckResult> _rows = Array.Empty<RealityCheckResult>();
+    private int _worse;
+
+    private readonly ApexChartOptions<RcCurvePoint> _opts = new()
+    {
+        Chart  = new Chart { Toolbar = new Toolbar { Show = false }, Background = "transparent" },
+        Theme  = new Theme { Mode = Mode.Dark },
+        Stroke = new Stroke { Width = 2, Curve = Curve.Smooth },
+        Colors = new List<string> { "#6b7088", "#7c5cff" },
+        Xaxis  = new XAxis { Type = XAxisType.Datetime },
+    };
+
+    protected override void OnInitialized()
+    {
+        if (RC.HasData)
+        {
+            _coin = RC.Coins.Contains("BTCUSDT") ? "BTCUSDT" : RC.Coins.First();
+            _strategy = RC.Strategies.First();
+            RefreshSelection();
+        }
+    }
+
+    private void SelectCoin(string c) { _coin = c; RefreshSelection(); }
+    private void OnStrategyChanged() => RefreshSelection();
+
+    private void RefreshSelection()
+    {
+        _rows = RC.For(_coin, _strategy);
+        _worse = _rows.Count(r => r.EdgeReturn < 0);
+        _selected = _rows.FirstOrDefault();
+    }
+
+    private static string SignPct(decimal f) => f.ToString("+0.0%;-0.0%;0.0%");
+    private static string EdgeColor(decimal edge) => edge < 0 ? "#ff5c7c" : "#3ddc84";
+}
