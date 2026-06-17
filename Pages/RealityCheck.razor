@@ -1,133 +1,219 @@
+@page "/"
 @page "/reality-check"
-@using Color = MudBlazor.Color
-@using Size = MudBlazor.Size
+@layout Layout.PublicLayout
 @inject RealityCheckService RC
 
-<PageTitle>Reality Check — can you beat just holding?</PageTitle>
+<PageTitle>Reality Check — can two bots beat just holding?</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="py-6">
+<div class="rc-shell">
 
-    <MudText Typo="Typo.h3" Class="mb-1" Style="font-weight:700;">Reality Check</MudText>
-    <MudText Typo="Typo.h6" Class="mb-4" Style="color:#9aa0b5;font-weight:400;">
-        We tried hard to beat <b>just holding</b> on Binance. Here's what really happened — on real data, after fees.
-    </MudText>
+    <!-- ── Hero ───────────────────────────────────────────── -->
+    <div class="rc-eyebrow">Honest receipts · real Binance data · after fees</div>
+    <h1 class="rc-h1">We built two trading bots to beat crypto.<br />They couldn't.</h1>
+    <p class="rc-sub">
+        Two AI-assisted bots ran on real market data for months — one on Ethereum, one on Bitcoin —
+        trying every popular way to outsmart the market. Here's exactly what happened, with nothing hidden.
+    </p>
+    <div class="rc-status">
+        <span class="rc-dot"></span>
+        Both bots are switched off. Everything below is a frozen snapshot of real backtests — nothing is trading live.
+    </div>
 
     @if (!RC.HasData)
     {
-        <MudAlert Severity="Severity.Warning">No results loaded yet.</MudAlert>
+        <div class="rc-section"><MudAlert Severity="Severity.Warning">No results loaded yet.</MudAlert></div>
     }
     else
     {
-        <!-- Controls -->
-        <MudPaper Elevation="0" Class="pa-4 mb-4 d-flex align-center flex-wrap gap-4"
-                  Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
-            <div>
-                <MudText Typo="Typo.caption" Style="color:#9aa0b5;">Coin</MudText>
-                <MudButtonGroup OverrideStyles="false" Class="d-flex gap-2">
-                    @foreach (var c in RC.Coins)
-                    {
-                        <MudButton Variant="@(_coin == c ? Variant.Filled : Variant.Outlined)"
-                                   Color="Color.Primary" Size="Size.Small" OnClick="@(() => SelectCoin(c))">
-                            @RealityCheckService.CoinLabel(c)
-                        </MudButton>
-                    }
-                </MudButtonGroup>
+        <!-- ── The two bots ──────────────────────────────────── -->
+        <section class="rc-section">
+            <div class="rc-kicker">Meet the bots</div>
+            <h2 class="rc-h2">Two coins, one honest verdict</h2>
+            <p class="rc-lead">
+                Same engine, same AI, pointed at the two biggest coins. Click either to explore its results below.
+            </p>
+
+            <div class="rc-grid">
+                @{ var (we, te) = SummaryFor("ETHUSDT"); }
+                <div class="rc-card rc-bot eth @(_coin == "ETHUSDT" ? "sel" : "")" @onclick='() => SelectCoin("ETHUSDT")'>
+                    <div class="rc-bothead">
+                        <div class="rc-glyph eth" style="font-size:1.6rem;font-weight:800;color:var(--eth-2);">Ξ</div>
+                        <div>
+                            <div class="rc-botname">Aether</div>
+                            <div class="rc-botcoin">Ethereum · ETH</div>
+                        </div>
+                    </div>
+                    <div class="rc-botdesc">
+                        Bought every dip and sold every bounce on Ethereum — its settings tuned in real time by a
+                        reinforcement-learning optimiser and a Claude AI advisor.
+                    </div>
+                    <div class="rc-verdict">
+                        <b style="color:var(--bad);">@we / @te</b>
+                        <span>market conditions where it lost to simply holding</span>
+                    </div>
+                    <a href="/bots/aether" class="rc-pickhint" style="text-decoration:none;color:var(--eth-2);" @onclick:stopPropagation="true">See Aether's last run, history &amp; settings →</a>
+                </div>
+
+                @{ var (wb, tb) = SummaryFor("BTCUSDT"); }
+                <div class="rc-card rc-bot btc @(_coin == "BTCUSDT" ? "sel" : "")" @onclick='() => SelectCoin("BTCUSDT")'>
+                    <div class="rc-bothead">
+                        <div class="rc-glyph btc" style="font-size:1.5rem;font-weight:800;color:var(--btc);">₿</div>
+                        <div>
+                            <div class="rc-botname">BitGain</div>
+                            <div class="rc-botcoin">Bitcoin · BTC</div>
+                        </div>
+                    </div>
+                    <div class="rc-botdesc">
+                        The identical strategy and AI pointed at Bitcoin instead. Different coin, same outcome —
+                        a clean test that the result wasn't just one unlucky market.
+                    </div>
+                    <div class="rc-verdict">
+                        <b style="color:var(--bad);">@wb / @tb</b>
+                        <span>market conditions where it lost to simply holding</span>
+                    </div>
+                    <a href="/bots/bitgain" class="rc-pickhint" style="text-decoration:none;color:var(--btc-2);" @onclick:stopPropagation="true">See BitGain's last run, history &amp; settings →</a>
+                </div>
             </div>
-            <MudSelect T="string" Label="Strategy" @bind-Value="_strategy" @bind-Value:after="OnStrategyChanged"
-                       Dense="true" Style="min-width:340px;">
+        </section>
+
+        <!-- ── Explorer ──────────────────────────────────────── -->
+        <section class="rc-section">
+            <div class="rc-kicker">The receipts</div>
+            <h2 class="rc-h2">@BotName on @RealityCheckService.CoinLabel(_coin) — strategy vs. just holding</h2>
+            <p class="rc-lead">
+                We didn't just test one idea. Pick any popular strategy and see how it did across real crashes,
+                slow bear markets, flat chop and bull runs — every trade charged a realistic fee and slippage.
+            </p>
+
+            <div class="rc-pills">
                 @foreach (var s in RC.Strategies)
                 {
-                    <MudSelectItem Value="@s">@RealityCheckService.StrategyLabel(s)</MudSelectItem>
-                }
-            </MudSelect>
-        </MudPaper>
-
-        <!-- Verdict -->
-        @if (_rows.Count > 0)
-        {
-            <MudAlert Severity="@(_worse >= _rows.Count - _worse ? Severity.Error : Severity.Success)"
-                      Variant="Variant.Outlined" Class="mb-4">
-                <b>@RealityCheckService.StrategyLabel(_strategy)</b> on @RealityCheckService.CoinLabel(_coin):
-                underperformed simply holding in <b>@_worse of @_rows.Count</b> tested market conditions
-                (after a realistic @($"{_rows[0].SlippagePercent:P3}") slippage + @($"{_rows[0].TakerFeePercent:0.##}%") fee per trade).
-            </MudAlert>
-
-            <!-- Regime cards -->
-            <div class="d-flex flex-wrap gap-3 mb-4">
-                @foreach (var r in _rows)
-                {
-                    var sel = ReferenceEquals(r, _selected);
-                    var border = sel ? "#7c5cff" : "#1e1e2e";
-                    <MudPaper Elevation="0" @onclick="@(() => _selected = r)"
-                              Style="@($"cursor:pointer;min-width:230px;flex:1;padding:14px;border-radius:12px;background:#12121a;border:1px solid {border};")">
-                        <MudText Typo="Typo.subtitle2" Style="color:#c8cce0;">@RealityCheckService.RegimeLabel(r.Dataset)</MudText>
-                        <MudText Typo="Typo.h5" Style="@($"font-weight:700;color:{EdgeColor(r.EdgeReturn)};")">
-                            @SignPct(r.EdgeReturn) <span style="font-size:0.6em;color:#9aa0b5;">vs holding</span>
-                        </MudText>
-                        <MudText Typo="Typo.body2" Style="color:#9aa0b5;">
-                            strategy @SignPct(r.StrategyReturn) &nbsp;·&nbsp; hold @SignPct(r.BuyHoldReturn)
-                        </MudText>
-                        <MudText Typo="Typo.caption" Style="color:#6b7088;">
-                            @r.TradeCount trades · worst drop @($"{r.StrategyMaxDrawdown:P0}")
-                        </MudText>
-                    </MudPaper>
+                    <div class="rc-pill @(_strategy == s ? "sel" : "")" @onclick="@(() => SelectStrategy(s))">
+                        @RealityCheckService.StrategyLabel(s)
+                    </div>
                 }
             </div>
 
-            <!-- Chart -->
-            @if (_selected is not null)
+            @if (_rows.Count > 0)
             {
-                <MudPaper Elevation="0" Class="pa-4 mb-4"
-                          Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
-                    <MudText Typo="Typo.subtitle1" Class="mb-2">
-                        @RealityCheckService.RegimeLabel(_selected.Dataset) — $100 invested, strategy vs holding
-                    </MudText>
-                    <ApexChart TItem="RcCurvePoint" Options="_opts" Height="320" @key="@($"{_coin}{_strategy}{_selected.Dataset}")">
-                        <ApexPointSeries TItem="RcCurvePoint" Items="_selected.Curve" Name="Just holding"
-                                         SeriesType="SeriesType.Line"
-                                         XValue="@(p => (IConvertible)new DateTimeOffset(p.T, TimeSpan.Zero).ToUnixTimeMilliseconds())"
-                                         YValue="@(p => p.BuyHold)" />
-                        <ApexPointSeries TItem="RcCurvePoint" Items="_selected.Curve" Name="This strategy"
-                                         SeriesType="SeriesType.Line"
-                                         XValue="@(p => (IConvertible)new DateTimeOffset(p.T, TimeSpan.Zero).ToUnixTimeMilliseconds())"
-                                         YValue="@(p => p.Strategy)" />
-                    </ApexChart>
-                </MudPaper>
-            }
-        }
+                <p class="rc-lead" style="margin-top:18px;font-size:0.92rem;">
+                    Each card shows <b style="color:var(--ink);">the money you'd actually have</b> after the run.
+                    Beating buy-and-hold in a downturn just means <b style="color:var(--ink);">losing less</b> — not making money.
+                </p>
+                <div class="rc-regimes">
+                    @foreach (var r in _rows)
+                    {
+                        <div class="rc-reg @(ReferenceEquals(r, _selected) ? "sel" : "")" @onclick="@(() => _selected = r)">
+                            <div class="rc-reg-name">@RealityCheckService.RegimeLabel(r.Dataset)</div>
+                            <div class="rc-reg-edge" style="color:@ReturnColor(r.StrategyReturn);">
+                                @SignPct(r.StrategyReturn) <small>@(r.StrategyReturn < 0 ? "you'd have lost" : "you'd have made")</small>
+                            </div>
+                            <div class="rc-reg-detail" style="color:@(r.EdgeReturn < 0 ? "#ff5c7c" : "#9aa0b5");font-weight:@(r.EdgeReturn < 0 ? "600" : "400");">@SignPct(r.EdgeReturn) vs holding — @EdgeWord(r)</div>
+                            <div class="rc-reg-meta">holding @SignPct(r.BuyHoldReturn) · @r.TradeCount trades</div>
+                        </div>
+                    }
+                </div>
 
-        <!-- Honest takeaway + donation -->
-        <MudPaper Elevation="0" Class="pa-4"
-                  Style="background:#12121a;border:1px solid #1e1e2e;border-radius:12px;">
-            <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight:600;">Why we're giving this away</MudText>
-            <MudText Typo="Typo.body2" Style="color:#9aa0b5;" Class="mb-3">
-                We're not selling signals, courses, or a "profitable bot." Almost every prediction strategy we
-                tested lost to simply holding once you pay real fees. The boring options — hold, dollar-cost-average,
-                and (if you want yield without gambling on direction) transparent market-neutral carry — are the ones
-                that survive the data.
-            </MudText>
-            <MudText Typo="Typo.body2" Class="mb-1">
-                If this saved you money or a bad idea and you'd like to say thanks (never expected):
-            </MudText>
-            <MudText Typo="Typo.body1" Style="font-family:monospace;color:#7c5cff;">
-                ETH / any EVM token: @DonationAddress
-            </MudText>
-            <MudText Typo="Typo.caption" Style="color:#6b7088;" Class="mt-3 d-block">
+                @if (_selected is not null)
+                {
+                    <div class="rc-chartwrap">
+                        <div class="rc-chart-title">@RealityCheckService.RegimeLabel(_selected.Dataset) — $100 invested</div>
+                        <div class="rc-chart-sub">
+                            after a realistic @($"{_selected.SlippagePercent:P3}") slippage + @($"{_selected.TakerFeePercent:0.##}%") fee per trade
+                        </div>
+                        <ApexChart TItem="RcCurvePoint" Options="_opts" Height="320" @key="@($"{_coin}{_strategy}{_selected.Dataset}")">
+                            <ApexPointSeries TItem="RcCurvePoint" Items="_selected.Curve" Name="Just holding"
+                                             SeriesType="SeriesType.Line"
+                                             XValue="@(p => (IConvertible)new DateTimeOffset(p.T, TimeSpan.Zero).ToUnixTimeMilliseconds())"
+                                             YValue="@(p => p.BuyHold)" />
+                            <ApexPointSeries TItem="RcCurvePoint" Items="_selected.Curve" Name="The bot's strategy"
+                                             SeriesType="SeriesType.Line"
+                                             XValue="@(p => (IConvertible)new DateTimeOffset(p.T, TimeSpan.Zero).ToUnixTimeMilliseconds())"
+                                             YValue="@(p => p.Strategy)" />
+                        </ApexChart>
+                    </div>
+                }
+            }
+        </section>
+
+        <!-- ── Why the AI couldn't save it ───────────────────── -->
+        <section class="rc-section">
+            <div class="rc-kicker">The part nobody admits</div>
+            <h2 class="rc-h2">"But it has AI" — why that didn't help</h2>
+            <p class="rc-prose">
+                These weren't dumb bots. Each one carried a <strong>self-learning optimiser</strong> (a multi-armed
+                bandit that rewarded settings that made money) and a <strong>Claude AI advisor</strong> reading the
+                market. People assume that's the missing ingredient. It isn't — and here's the honest reason why.
+            </p>
+            <div class="rc-points">
+                <div class="rc-point">
+                    <div class="rc-point-n">1</div>
+                    <div class="rc-point-t">
+                        <b>You can't optimise an edge that was never there.</b> The AI tuned <i>how</i> the bot bought
+                        dips — how deep, when to sell. But buying dips on spot has roughly zero expected profit before
+                        costs, and a negative one after fees and slippage. Optimisation just finds the settings that
+                        lost the least on <b>past</b> data. That's curve-fitting to history, not a prediction that holds up next month.
+                    </div>
+                </div>
+                <div class="rc-point">
+                    <div class="rc-point-n">2</div>
+                    <div class="rc-point-t">
+                        <b>The bandit assumes a stable game. Markets aren't.</b> A bandit only converges when each choice
+                        has a roughly fixed payoff. Here the best setting in a calm month is the worst one in a crash —
+                        and which regime comes next is exactly the thing nobody can predict. So it kept confidently
+                        chasing the last regime's noise into the next one.
+                    </div>
+                </div>
+                <div class="rc-point">
+                    <div class="rc-point-n">3</div>
+                    <div class="rc-point-t">
+                        <b>An LLM can't see tomorrow's price.</b> The Claude advisor reads news and indicators, but it has
+                        no privileged information about where ETH or BTC goes next — nobody does. In practice it added
+                        confident-sounding, costly noise, and sometimes overrode the optimiser for the worse.
+                    </div>
+                </div>
+                <div class="rc-point">
+                    <div class="rc-point-n">4</div>
+                    <div class="rc-point-t">
+                        <b>We fixed the bugs. It didn't matter.</b> We found and corrected real wiring faults in the reward
+                        loop. The ceiling didn't move: a perfectly-tuned optimiser on top of a no-edge strategy still nets
+                        to about break-even before costs — and just holding wins after them.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Takeaway + donation ───────────────────────────── -->
+        <div class="rc-donate">
+            <h2 class="rc-h2" style="margin-top:0;">Why we're giving this away</h2>
+            <p class="rc-prose">
+                We're not selling signals, courses, or a "profitable bot." Almost every prediction strategy we tested
+                lost to simply holding once you pay real fees. The boring options — <strong>hold</strong>,
+                <strong>dollar-cost-average</strong>, and (if you want yield without betting on direction) transparent
+                market-neutral carry — are the ones that survive the data.
+            </p>
+            <p class="rc-prose" style="margin-top:14px;">If this saved you money or a bad idea and you'd like to say thanks (never expected):</p>
+            <div class="rc-addr">ETH / any EVM token &nbsp;·&nbsp; @DonationAddress</div>
+            <p class="rc-fine">
                 Educational analysis of historical data — not financial advice. Past results don't predict the future.
-            </MudText>
-        </MudPaper>
+            </p>
+        </div>
     }
-</MudContainer>
+</div>
 
 @code {
     // TODO: replace with the project owner's real ETH wallet before publishing.
     private const string DonationAddress = "<ETH address pending>";
 
-    private string _coin = "BTCUSDT";
-    private string _strategy = "Technical";
+    // The strategy the two live bots actually ran (drives each bot card's headline stat).
+    private const string BotStrategy = "BuildEthCycling";
+
+    private string _coin = "ETHUSDT";
+    private string _strategy = BotStrategy;
     private RealityCheckResult? _selected;
     private IReadOnlyList<RealityCheckResult> _rows = Array.Empty<RealityCheckResult>();
-    private int _worse;
+
+    private string BotName => _coin == "BTCUSDT" ? "BitGain" : "Aether";
 
     private readonly ApexChartOptions<RcCurvePoint> _opts = new()
     {
@@ -136,28 +222,48 @@
         Stroke = new Stroke { Width = 2, Curve = Curve.Smooth },
         Colors = new List<string> { "#6b7088", "#7c5cff" },
         Xaxis  = new XAxis { Type = XAxisType.Datetime },
+        Legend = new Legend { Labels = new LegendLabels { Colors = new List<string> { "#9aa0b5" } } },
     };
 
     protected override void OnInitialized()
     {
         if (RC.HasData)
         {
-            _coin = RC.Coins.Contains("BTCUSDT") ? "BTCUSDT" : RC.Coins.First();
-            _strategy = RC.Strategies.First();
+            _coin = RC.Coins.Contains("ETHUSDT") ? "ETHUSDT" : RC.Coins.First();
+            _strategy = RC.Strategies.Contains(BotStrategy) ? BotStrategy : RC.Strategies.First();
             RefreshSelection();
         }
     }
 
     private void SelectCoin(string c) { _coin = c; RefreshSelection(); }
-    private void OnStrategyChanged() => RefreshSelection();
+    private void SelectStrategy(string s) { _strategy = s; RefreshSelection(); }
 
     private void RefreshSelection()
     {
         _rows = RC.For(_coin, _strategy);
-        _worse = _rows.Count(r => r.EdgeReturn < 0);
         _selected = _rows.FirstOrDefault();
+    }
+
+    // How many tested regimes the bots' actual strategy lost to holding, for a coin.
+    private (int worse, int total) SummaryFor(string coin)
+    {
+        var rows = RC.For(coin, BotStrategy);
+        return (rows.Count(r => r.EdgeReturn < 0), rows.Count);
     }
 
     private static string SignPct(decimal f) => f.ToString("+0.0%;-0.0%;0.0%");
     private static string EdgeColor(decimal edge) => edge < 0 ? "#ff5c7c" : "#3ddc84";
+
+    // Colour by the money you'd actually have: made money = green, lost money = red.
+    private static string ReturnColor(decimal ret) => ret > 0 ? "#3ddc84" : ret < 0 ? "#ff5c7c" : "#9aa0b5";
+
+    // Plain-English read of the strategy-vs-holding edge, that never lets a loss look like a
+    // win — and never claims a do-nothing run "beat" holding.
+    private static string EdgeWord(RealityCheckResult r)
+    {
+        if (r.TradeCount == 0) return "it never traded — identical to just holding";
+        return r.EdgeReturn >= 0
+            ? (r.StrategyReturn < 0 ? "still a loss, just smaller than holding's" : "actually beat holding")
+            : "worse than holding";
+    }
 }

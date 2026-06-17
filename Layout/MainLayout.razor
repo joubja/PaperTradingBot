@@ -36,18 +36,10 @@
             </span>
         </span>
         <MudSpacer />
-        <MudTooltip Text="Dashboard">
-            <MudIconButton Href="/" Icon="@Icons.Material.Filled.Dashboard" Color="Color.Inherit" Size="Size.Small" />
-        </MudTooltip>
-        <MudTooltip Text="History">
-            <MudIconButton Href="/history" Icon="@Icons.Material.Filled.History" Color="Color.Inherit" Size="Size.Small" />
-        </MudTooltip>
-        <MudTooltip Text="Reality Check">
-            <MudIconButton Href="/reality-check" Icon="@Icons.Material.Filled.FactCheck" Color="Color.Inherit" Size="Size.Small" />
-        </MudTooltip>
-        <MudTooltip Text="Settings">
-            <MudIconButton Href="/settings" Icon="@Icons.Material.Filled.Tune" Color="Color.Inherit" Size="Size.Small" />
-        </MudTooltip>
+        <MudButton Href="/" StartIcon="@Icons.Material.Filled.FactCheck" Color="Color.Inherit" Size="Size.Small">Reality Check</MudButton>
+        <MudButton Href="/dashboard" StartIcon="@Icons.Material.Filled.Dashboard" Color="Color.Inherit" Size="Size.Small">Dashboard</MudButton>
+        <MudButton Href="/history" StartIcon="@Icons.Material.Filled.History" Color="Color.Inherit" Size="Size.Small">History</MudButton>
+        <MudButton Href="/settings" StartIcon="@Icons.Material.Filled.Tune" Color="Color.Inherit" Size="Size.Small">Settings</MudButton>
     </MudAppBar>
 
     <MudMainContent Style="padding-top:64px;">

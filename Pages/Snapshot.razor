@@ -1,0 +1,221 @@
+@page "/bots/{Bot}"
+@page "/bots/{Bot}/{View}"
+@layout Layout.PublicLayout
+@inject SnapshotService Snap
+
+<PageTitle>@(_s?.Bot ?? "Bot") snapshot — Reality Check</PageTitle>
+
+<div class="rc-shell">
+
+    <div class="rc-eyebrow">Frozen snapshot · genuine data from the bot's own logs</div>
+    <h1 class="rc-h1" style="font-size:clamp(2rem,5vw,3.2rem);">The bots, on the record</h1>
+    <p class="rc-sub">
+        Exactly what each bot did on its last run — every trade, its tuned settings, its equity over time.
+        Nothing here is live, and nothing can be started. For the only question that matters —
+        <a href="/" style="color:var(--eth-2);">did it beat just holding?</a> — see the Reality Check.
+    </p>
+
+    @if (!Snap.HasData || _s is null)
+    {
+        <div class="rc-section"><MudAlert Severity="Severity.Warning">No bot snapshots loaded.</MudAlert></div>
+    }
+    else
+    {
+        <!-- Workspace switcher -->
+        <div class="rc-ws">
+            <div class="rc-switch">
+                @foreach (var s in Snap.All)
+                {
+                    var key = SnapshotService.Key(s);
+                    var cls = (s.Coin == "BTC" ? "btc" : "eth") + (ReferenceEquals(s, _s) ? " on" : "");
+                    <a class="@cls" href="@($"/bots/{key}/{_view}")">
+                        <span class="rc-cglyph" style="color:@(s.Coin == "BTC" ? "var(--btc)" : "var(--eth-2)");">@(s.Coin == "BTC" ? "₿" : "Ξ")</span>
+                        @s.Bot <span style="color:var(--faint);font-weight:500;font-size:0.85em;">@s.Coin</span>
+                    </a>
+                }
+            </div>
+            <span class="rc-ro"><span class="rc-dot"></span>Read-only · bot is switched off</span>
+        </div>
+
+        <!-- Sub-tabs -->
+        <div class="rc-tabs">
+            <a class="rc-tab @(_view == "dashboard" ? "on" : "")" href="@($"/bots/{K}")">Last Run</a>
+            <a class="rc-tab @(_view == "history" ? "on" : "")" href="@($"/bots/{K}/history")">History (@_s.Trades.Count)</a>
+            <a class="rc-tab @(_view == "settings" ? "on" : "")" href="@($"/bots/{K}/settings")">Settings</a>
+        </div>
+
+        @if (_view == "dashboard")
+        {
+            <div class="rc-stats">
+                <div class="rc-tile">
+                    <div class="rc-tile-label">Ran for</div>
+                    <div class="rc-tile-val">@Duration</div>
+                    <div class="rc-tile-sub">@_s.Session.StartedAt.ToString("d MMM") – @(_s.Session.StoppedAt?.ToString("d MMM yyyy") ?? "—")</div>
+                </div>
+                <div class="rc-tile">
+                    <div class="rc-tile-label">Starting stake</div>
+                    <div class="rc-tile-val">@_s.Session.StartingCoin.ToString("0.#####") <span style="font-size:0.5em;color:var(--faint);">@_s.Coin</span></div>
+                    <div class="rc-tile-sub">strategy: @_s.Session.Strategy</div>
+                </div>
+                <div class="rc-tile">
+                    <div class="rc-tile-label">Final portfolio value</div>
+                    <div class="rc-tile-val">$@_s.FinalEquityUsd.ToString("N0")</div>
+                    <div class="rc-tile-sub">
+                        <span style="color:@CoinColor(UsdReturnPct);">@SignPct(UsdReturnPct)</span> in $ ·
+                        just holding: <span style="color:@CoinColor(HoldReturnPct);">@SignPct(HoldReturnPct)</span>
+                    </div>
+                </div>
+                <div class="rc-tile">
+                    <div class="rc-tile-label">Coin pile, after fees</div>
+                    <div class="rc-tile-val" style="color:@CoinColor(CoinDiff);">@SignPct(CoinDiffPct)</div>
+                    <div class="rc-tile-sub">@_s.Session.StartingCoin.ToString("0.#####") → @CoinEquivalent.ToString("0.#####") @_s.Coin equiv.</div>
+                </div>
+                <div class="rc-tile">
+                    <div class="rc-tile-label">Trades</div>
+                    <div class="rc-tile-val">@_s.Session.TradeCount</div>
+                    <div class="rc-tile-sub">over the whole run</div>
+                </div>
+                <div class="rc-tile">
+                    <div class="rc-tile-label">Win rate</div>
+                    <div class="rc-tile-val">@(_s.Session.WinRatePct?.ToString("0.#") ?? "—")%</div>
+                    <div class="rc-tile-sub">of closed trades</div>
+                </div>
+            </div>
+
+            <div class="rc-point" style="margin-top:22px;">
+                <div class="rc-point-n">!</div>
+                <div class="rc-point-t">
+                    <b>A high win rate is not the same as winning.</b> The bot booked many tiny profitable cycles
+                    while losers sat unrealised — and its dollar value mostly just tracked the coin's own price.
+                    In dollars it ended <b style="color:@CoinColor(UsdReturnPct);">@SignPct(UsdReturnPct)</b>, but simply
+                    holding the same @_s.Coin would have returned <b style="color:@CoinColor(HoldReturnPct);">@SignPct(HoldReturnPct)</b> —
+                    so it <b style="color:@CoinColor(VsHoldPct);">@(VsHoldPct < 0 ? "trailed" : "beat") holding by @(Math.Abs(VsHoldPct).ToString("0.0%"))</b>.
+                    Its real aim was to end with <i>more coin</i> than it started; valued back into @_s.Coin after fees it
+                    ended <b style="color:@CoinColor(CoinDiff);">@SignPct(CoinDiffPct)</b> — it didn't grow the pile.
+                    The full verdict is on the <a href="/" style="color:var(--eth-2);">Reality Check</a> page.
+                </div>
+            </div>
+
+            @if (_s.EquityCurve.Count > 0)
+            {
+                <div class="rc-chartwrap">
+                    <div class="rc-chart-title">Portfolio value over the run (USD)</div>
+                    <div class="rc-chart-sub">mostly follows the @_s.Coin price — not a measure of skill</div>
+                    <ApexChart TItem="SnapshotEquityPoint" Options="_opts" Height="320" @key="K">
+                        <ApexPointSeries TItem="SnapshotEquityPoint" Items="_s.EquityCurve" Name="Portfolio $"
+                                         SeriesType="SeriesType.Area"
+                                         XValue="@(p => (IConvertible)new DateTimeOffset(p.T, TimeSpan.Zero).ToUnixTimeMilliseconds())"
+                                         YValue="@(p => p.Equity)" />
+                    </ApexChart>
+                </div>
+            }
+        }
+        else if (_view == "history")
+        {
+            <div class="rc-tablewrap">
+                <table class="rc-table">
+                    <thead><tr><th>Time (UTC)</th><th>Side</th><th>Qty</th><th>Price</th><th>Notional</th><th>Fee</th><th>Realized PnL</th></tr></thead>
+                    <tbody>
+                    @foreach (var t in _s.Trades.OrderByDescending(t => t.Timestamp))
+                    {
+                        <tr>
+                            <td>@t.Timestamp.ToString("dd MMM HH:mm")</td>
+                            <td class="@(t.Side.Equals("BUY", StringComparison.OrdinalIgnoreCase) ? "rc-buy" : "rc-sell")">@t.Side.ToUpper()</td>
+                            <td>@t.Quantity.ToString("0.#####")</td>
+                            <td>$@t.Price.ToString("N2")</td>
+                            <td>$@t.Notional.ToString("N2")</td>
+                            <td>$@t.Commission.ToString("N2")</td>
+                            <td class="@(t.RealizedPnl > 0 ? "rc-num-pos" : t.RealizedPnl < 0 ? "rc-num-neg" : "")">
+                                @(t.RealizedPnl == 0 ? "—" : "$" + t.RealizedPnl.ToString("N2"))
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else if (_view == "settings")
+        {
+            <p class="rc-lead" style="margin-top:22px;">
+                The exact parameters the self-learning optimiser had landed on when the bot was switched off.
+                These are real tuned values — and per the Reality Check, optimising them still didn't beat holding.
+            </p>
+            <div class="rc-kv">
+                @foreach (var kv in SettingRows(_s.Settings))
+                {
+                    <div class="rc-kvrow"><div class="rc-kvk">@kv.Key</div><div class="rc-kvv">@kv.Value</div></div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string Bot { get; set; } = "";
+    [Parameter] public string? View { get; set; }
+
+    private BotSnapshot? _s;
+    private string _view = "dashboard";
+    private string K => _s is null ? "" : SnapshotService.Key(_s);
+
+    // ── Coin-pile metric (the bot's own goal: accumulate coin) ───────────────
+    // Value the WHOLE portfolio back into coin at the last traded price, so a bot
+    // that ended mid-cycle holding cash isn't misread as having dumped its coin.
+    private decimal EndPrice => _s is null ? 0m
+        : _s.Trades.Count > 0 ? _s.Trades.OrderByDescending(t => t.Timestamp).First().Price
+        : _s.FinalCoin > 0 ? _s.FinalEquityUsd / _s.FinalCoin : 0m;
+    private decimal CoinEquivalent => _s is null ? 0m : (EndPrice > 0 ? _s.FinalEquityUsd / EndPrice : _s.FinalCoin);
+    private decimal CoinDiff => _s is null ? 0m : CoinEquivalent - _s.Session.StartingCoin;
+    private decimal CoinDiffPct => (_s is not null && _s.Session.StartingCoin > 0) ? CoinDiff / _s.Session.StartingCoin : 0m;
+
+    // ── Dollar return, and what simply HOLDING the same coins would have done ──
+    private decimal StartEquityUsd => (_s is not null && _s.EquityCurve.Count > 0) ? _s.EquityCurve[0].Equity : 0m;
+    private decimal UsdReturnPct  => StartEquityUsd > 0 ? (_s!.FinalEquityUsd - StartEquityUsd) / StartEquityUsd : 0m;
+    private decimal HoldValueUsd  => _s is null ? 0m : _s.Session.StartingCoin * EndPrice;
+    private decimal HoldReturnPct => StartEquityUsd > 0 ? (HoldValueUsd - StartEquityUsd) / StartEquityUsd : 0m;
+    private decimal VsHoldPct     => UsdReturnPct - HoldReturnPct;
+
+    private static string SignPct(decimal f) => f.ToString("+0.0%;-0.0%;0.0%");
+    private static string CoinColor(decimal d) => d > 0 ? "#3ddc84" : d < 0 ? "#ff5c7c" : "#9aa0b5";
+
+    private static readonly string[] ValidViews = { "dashboard", "history", "settings" };
+
+    private readonly ApexChartOptions<SnapshotEquityPoint> _opts = new()
+    {
+        Chart  = new Chart { Toolbar = new Toolbar { Show = false }, Background = "transparent" },
+        Theme  = new Theme { Mode = Mode.Dark },
+        Stroke = new Stroke { Width = 2, Curve = Curve.Smooth },
+        Colors = new List<string> { "#7c5cff" },
+        Fill   = new Fill { Type = new List<FillType> { FillType.Gradient }, Gradient = new FillGradient { OpacityFrom = 0.35, OpacityTo = 0.0 } },
+        Xaxis  = new XAxis { Type = XAxisType.Datetime },
+    };
+
+    protected override void OnParametersSet()
+    {
+        _s = Snap.ByKey(Bot);
+        var v = (View ?? "dashboard").ToLowerInvariant();
+        _view = ValidViews.Contains(v) ? v : "dashboard";
+    }
+
+    private string Duration
+    {
+        get
+        {
+            var end = _s?.Session.StoppedAt ?? DateTime.UtcNow;
+            var span = end - (_s?.Session.StartedAt ?? end);
+            return span.TotalDays >= 1 ? $"{span.TotalDays:0} days" : $"{span.TotalHours:0} h";
+        }
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> SettingRows(SnapshotSettings s) => new[]
+    {
+        new KeyValuePair<string,string>("RSI dip-buy threshold", s.RsiDipBuy.ToString("0.#")),
+        new KeyValuePair<string,string>("RSI crossover max", s.RsiCrossoverMax.ToString("0.#")),
+        new KeyValuePair<string,string>("RSI cycle-sell", s.RsiCycleSell.ToString("0.#")),
+        new KeyValuePair<string,string>("RSI cycle-rebuy", s.RsiCycleRebuy.ToString("0.#")),
+        new KeyValuePair<string,string>("Default sell %", (s.DefaultSellPct * 100).ToString("0.#") + "%"),
+        new KeyValuePair<string,string>("Min abandon rise", (s.MinAbandonRise * 100).ToString("0.##") + "%"),
+        new KeyValuePair<string,string>("Max abandon rise", (s.MaxAbandonRise * 100).ToString("0.##") + "%"),
+        new KeyValuePair<string,string>("Cycle cooldown (bars)", s.CycleCooldownBars.ToString()),
+    };
+}

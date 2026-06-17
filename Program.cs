@@ -56,6 +56,9 @@ services.AddMudServices();
 // Public "Reality Check" page — loads precomputed backtest results (wwwroot/reality-check).
 services.AddSingleton<RealityCheckService>();
 
+// Read-only frozen snapshots of both bots' last runs (wwwroot/snapshots).
+services.AddSingleton<SnapshotService>();
+
 // ── Infrastructure ────────────────────────────────────────────────────────────
 services.AddSingleton<DatabaseService>();
 services.AddSingleton<BinanceAccountService>();
