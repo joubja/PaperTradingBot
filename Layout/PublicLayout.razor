@@ -27,7 +27,7 @@
         --glass: rgba(255,255,255,0.035);
         min-height: 100vh;
         position: relative;
-        overflow-x: hidden;
+        overflow-x: clip; /* clip (not hidden) — hidden creates a scroll container that breaks the sticky nav */
         background: #07070b;
         color: var(--ink);
         font-family: 'Inter', system-ui, -apple-system, sans-serif;
