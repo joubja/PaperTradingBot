@@ -235,9 +235,12 @@
     .rc-donatebtn:hover { transform: translateY(-1px); filter: brightness(1.07); box-shadow: 0 12px 28px -10px rgba(247,147,26,0.7); }
     .rc-donatebtn svg { width: 16px; height: 16px; }
     @@media (max-width: 640px) {
-        .rc-brand span.rc-bword { display: none; }
+        /* Keep the "Reality Check" title on the left in the top nav; show nav
+           items as icons so everything still fits on a phone. */
+        .rc-brand { font-size: 0.98rem; }
         .rc-navlabel { display: none; }
-        .rc-navlink { padding: 8px 11px; }
+        .rc-navlink { padding: 8px 10px; }
+        .rc-nav-inner { padding: 12px 16px; gap: 8px; }
     }
 
     /* ── Footer ───────────────────────────────────────────── */
