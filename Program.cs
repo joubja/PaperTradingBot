@@ -48,6 +48,16 @@ services.Configure<NotificationOptions>(builder.Configuration.GetSection("Notifi
 // ── HTTP clients (Claude API, etc.) ──────────────────────────────────────────
 services.AddHttpClient();
 
+// ── Reverse-proxy awareness (public deploy: nginx TLS proxy → Kestrel on localhost)
+// Honour X-Forwarded-For/-Proto so the app knows the real client scheme (https) and
+// builds correct absolute links / redirect URIs. nginx runs on loopback, which is a
+// trusted proxy network by default. Harmless when running behind no proxy (tunnel).
+services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                       | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+});
+
 // ── Blazor / MudBlazor ────────────────────────────────────────────────────────
 services.AddRazorPages();
 services.AddServerSideBlazor();
@@ -170,6 +180,9 @@ botState.OnCycleCompleted += e =>
         e.Symbol, e.NetEthGain, e.Reward,
         perfTracker.RollingReward(), perfTracker.TotalRecorded);
 };
+
+// Must run before anything that inspects scheme/host so X-Forwarded-* from nginx wins.
+app.UseForwardedHeaders();
 
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error");

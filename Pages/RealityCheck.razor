@@ -74,6 +74,13 @@
                     <a href="/bots/bitgain" class="rc-pickhint" style="text-decoration:none;color:var(--btc-2);" @onclick:stopPropagation="true">See BitGain's last run, history &amp; settings →</a>
                 </div>
             </div>
+
+            <p class="rc-prose" style="margin-top:18px;">
+                Nothing here is hidden. The full source for both bots — the trading engine, every strategy, the
+                reinforcement-learning optimiser, the Claude AI advisor and the backtests behind these verdicts — is
+                open on GitHub: <a href="@RepoUrl" target="_blank" rel="noopener" style="color:var(--eth-2);">@RepoUrl</a>.
+                Read it, run it, or check our numbers yourself.
+            </p>
         </section>
 
         <!-- ── Explorer ──────────────────────────────────────── -->
@@ -183,6 +190,27 @@
             </div>
         </section>
 
+        <!-- ── Is it ALL trading bots? (honesty carve-out) ───── -->
+        <section class="rc-section">
+            <div class="rc-kicker">Before you @@-reply us</div>
+            <h2 class="rc-h2">Is it <i>all</i> trading bots?</h2>
+            <p class="rc-prose">
+                No — and we won't pretend otherwise. What loses is the popular kind: bots that try to
+                <strong>predict short-term price direction</strong>. On crypto, and by the same logic on forex and
+                stocks, those lose to simply holding once you pay real fees — which is why the large majority of
+                retail algo and day traders end up underwater.
+            </p>
+            <p class="rc-prose" style="margin-top:14px;">
+                The strategies that genuinely survive the data <strong>don't predict at all.</strong> They're
+                <strong>market-neutral</strong> — long-short and pairs trades that harvest the price gap between
+                related instruments, <strong>carry</strong> that collects a structural yield instead of betting on
+                direction, and true <strong>arbitrage</strong> and market-making. Those edges are real. They're also
+                small, fiercely competed by funds with scale and near-zero costs, and at retail fees usually get eaten
+                before you see them. So: not "bots can't work" — rather, <strong>the bots being sold to you, the ones
+                that promise to call the market, are the ones that don't.</strong>
+            </p>
+        </section>
+
         <!-- ── Takeaway + donation ───────────────────────────── -->
         <div class="rc-donate">
             <h2 class="rc-h2" style="margin-top:0;">Why we're giving this away</h2>
@@ -194,6 +222,10 @@
             </p>
             <p class="rc-prose" style="margin-top:14px;">If this saved you money or a bad idea and you'd like to say thanks (never expected):</p>
             <div class="rc-addr">ETH / any EVM token &nbsp;·&nbsp; @DonationAddress</div>
+            <p class="rc-prose" style="margin-top:14px;">
+                Rather just have the code? It's all free and open:
+                <a href="@RepoUrl" target="_blank" rel="noopener" style="color:var(--eth-2);">@RepoUrl</a>.
+            </p>
             <p class="rc-fine">
                 Educational analysis of historical data — not financial advice. Past results don't predict the future.
             </p>
@@ -202,8 +234,10 @@
 </div>
 
 @code {
-    // TODO: replace with the project owner's real ETH wallet before publishing.
-    private const string DonationAddress = "<ETH address pending>";
+    private const string DonationAddress = "0xBdF0f62374379D234519Fbb8A754dF03cA2E9149";
+
+    // Full source for both bots (engine, strategies, AI optimiser/advisor, backtests).
+    private const string RepoUrl = "https://github.com/joubja/PaperTradingBot";
 
     // The strategy the two live bots actually ran (drives each bot card's headline stat).
     private const string BotStrategy = "BuildEthCycling";
