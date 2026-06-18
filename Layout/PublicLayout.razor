@@ -219,6 +219,15 @@
     .rc-navlink:hover { color: var(--ink); background: var(--glass); }
     .rc-navlink.active { color: #fff; background: var(--glass); border-color: var(--line); }
     .rc-navlink svg { width: 17px; height: 17px; opacity: 0.85; }
+    .rc-donatebtn {
+        display: inline-flex; align-items: center; gap: 7px; margin-left: 6px;
+        padding: 8px 16px; border-radius: 10px; font-size: 0.9rem; font-weight: 700;
+        color: #fff; text-decoration: none; white-space: nowrap;
+        background: linear-gradient(120deg, var(--eth), var(--btc)); border: 1px solid transparent;
+        box-shadow: 0 8px 24px -10px rgba(124,92,255,0.7); transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
+    }
+    .rc-donatebtn:hover { transform: translateY(-1px); filter: brightness(1.07); box-shadow: 0 12px 28px -10px rgba(247,147,26,0.7); }
+    .rc-donatebtn svg { width: 16px; height: 16px; }
     @@media (max-width: 640px) {
         .rc-brand span.rc-bword { display: none; }
         .rc-navlabel { display: none; }
@@ -238,6 +247,10 @@
                 <a class="rc-navlink @(IsActive("/bots") ? "active" : "")" href="/bots/aether">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
                     <span class="rc-navlabel">Bot Snapshots</span>
+                </a>
+                <a class="rc-donatebtn" href="/#donate">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                    <span class="rc-navlabel">Donate</span>
                 </a>
             </div>
         </div>
