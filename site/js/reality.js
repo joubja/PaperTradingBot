@@ -150,6 +150,17 @@
             });
         });
         refresh();
+        // The explorer (pills/regimes/chart) renders only after this fetch, so the
+        // browser's initial jump to a #hash (e.g. arriving at /#donate from the bots
+        // page) lands before that content exists and ends up too high. Re-scroll once
+        // the content has settled.
+        if (location.hash.length > 1) {
+            var scrollToHash = function () {
+                try { var el = document.querySelector(location.hash); if (el) el.scrollIntoView(); } catch (e) { }
+            };
+            scrollToHash();
+            setTimeout(scrollToHash, 200);
+        }
     }).catch(function (e) {
         document.getElementById("rc-regimes").textContent = "Couldn't load results.";
     });
