@@ -7,12 +7,32 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PaperTradingBot</title>
     <base href="~/" />
+
+    @* ── SEO: default metadata (per-page <PageTitle>/<HeadContent> override via HeadOutlet) ── *@
+    <meta name="description" content="We built two AI-assisted crypto trading bots and ran them on real Binance market data for months. After fees, both lost to simply holding. See the honest, no-cookie results — and the strategies that actually survive." />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="theme-color" content="#07070b" />
+    <meta name="author" content="hodlbeatsbots" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+    @* Open Graph / Twitter (social previews) *@
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="hodlbeatsbots" />
+    <meta property="og:title" content="Do Crypto Trading Bots Actually Work?" />
+    <meta property="og:description" content="Two AI crypto bots, real Binance data, months of trading — both lost to simply holding after fees. The honest results, free and open." />
+    <meta property="og:url" content="https://hodlbeatsbots.com/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Do Crypto Trading Bots Actually Work?" />
+    <meta name="twitter:description" content="Two AI crypto bots, real Binance data — both lost to simply holding after fees. The honest results." />
+
     <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet" />
     <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
     <link href="css/app.css" rel="stylesheet" />
+
+    @* Per-page <title>/<HeadContent> are emitted here during prerender (good for SEO).
+       Every routable page sets its own <PageTitle>, so no static fallback is needed. *@
+    <component type="typeof(HeadOutlet)" render-mode="ServerPrerendered" />
 </head>
 <body>
     @RenderBody()
