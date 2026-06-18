@@ -136,7 +136,7 @@
     .rc-chart-sub { font-size: 0.82rem; color: var(--faint); margin-bottom: 12px; }
 
     /* ── Prose / AI section ───────────────────────────────── */
-    .rc-prose { color: var(--muted); font-size: 1.0rem; line-height: 1.65; max-width: 760px; }
+    .rc-prose { color: var(--muted); font-size: 1.0rem; line-height: 1.65; max-width: 760px; overflow-wrap: anywhere; }
     .rc-prose strong { color: var(--ink); font-weight: 600; }
     .rc-points { display: grid; gap: 14px; margin-top: 24px; }
     .rc-point { display: flex; gap: 14px; padding: 18px; border-radius: 14px; background: var(--glass); border: 1px solid var(--line); }
@@ -199,11 +199,16 @@
     .rc-kvrow { padding: 14px 18px; border-radius: 12px; background: var(--glass); border: 1px solid var(--line); }
     .rc-kvk { font-size: 0.8rem; color: var(--muted); } .rc-kvv { font-size: 1.15rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-top: 3px; }
 
-    /* ── Top navigation (scrolls away; bottom dock takes over) ─ */
+    /* ── Top navigation ───────────────────────────────────────
+       Phones/tablets (under 768px): scrolls away, bottom dock takes over.
+       Laptops and up (768px+): frozen sticky bar at the top, no dock. */
     .rc-nav {
         position: relative;
         backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
         background: rgba(7,7,11,0.72); border-bottom: 1px solid var(--line);
+    }
+    @@media (min-width: 768px) {
+        .rc-nav { position: sticky; top: 0; z-index: 30; }
     }
     .rc-nav-inner { max-width: 1080px; margin: 0 auto; padding: 12px 24px;
                     display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -276,6 +281,8 @@
         .rc-dock .rc-navlink { padding: 10px 12px; }
     }
     @@media (prefers-reduced-motion: reduce) { .rc-dock { transition: opacity .2s ease; } }
+    /* Laptops+: the sticky top nav stays put, so the bottom dock is never used. */
+    @@media (min-width: 768px) { .rc-dock { display: none; } }
 </style>
 
 <div class="rc-root">

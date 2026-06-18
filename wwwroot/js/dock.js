@@ -1,21 +1,20 @@
 // Shows the floating bottom nav dock once the top nav has scrolled out of view.
-// Plain DOM enhancement (works with the prerendered HTML); the nav element lives
-// in the persistent layout, so a single observer survives Blazor SPA navigation.
+// Re-queries .rc-nav on every check (rather than observing a node once) because
+// Blazor Server prerender->hydration and SPA navigation swap the nav DOM node;
+// a one-shot IntersectionObserver would end up watching a detached element.
 (function () {
-    function init() {
+    function update() {
         var nav = document.querySelector('.rc-nav');
-        if (!nav) return false;
-        var io = new IntersectionObserver(function (entries) {
-            var visible = entries[0].isIntersecting;
-            document.body.classList.toggle('rc-show-dock', !visible);
-        }, { threshold: 0 });
-        io.observe(nav);
-        return true;
+        if (!nav) return;
+        // Dock appears only once the top nav is fully above the viewport.
+        var out = nav.getBoundingClientRect().bottom <= 4;
+        document.body.classList.toggle('rc-show-dock', out);
     }
-    if (!init()) {
-        var tries = 0;
-        var t = setInterval(function () {
-            if (init() || ++tries > 40) clearInterval(t);
-        }, 150);
-    }
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    document.addEventListener('DOMContentLoaded', update);
+    // Safety net: corrects the state after hydration or SPA navigation swaps the
+    // nav node (those don't fire a scroll event). Cheap — one getBoundingClientRect.
+    setInterval(update, 500);
+    update();
 })();
