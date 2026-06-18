@@ -233,6 +233,24 @@
         .rc-navlabel { display: none; }
         .rc-navlink { padding: 8px 11px; }
     }
+
+    /* ── Footer ───────────────────────────────────────────── */
+    .rc-footer {
+        position: relative; z-index: 1;
+        max-width: 1080px; margin: 72px auto 0; padding: 26px 24px 44px;
+        border-top: 1px solid var(--line);
+        display: flex; align-items: center; justify-content: space-between;
+        flex-wrap: wrap; gap: 12px 20px;
+        font-size: 0.82rem; color: var(--faint);
+    }
+    .rc-footer a { color: var(--muted); text-decoration: none; transition: color .16s ease; }
+    .rc-footer a:hover { color: var(--ink); }
+    .rc-foot-note { display: inline-flex; align-items: center; gap: 8px; }
+    .rc-foot-dot { width: 6px; height: 6px; border-radius: 50%;
+                   background: linear-gradient(120deg, var(--eth), var(--btc)); flex-shrink: 0; }
+    .rc-foot-cookie { display: inline-flex; align-items: center; gap: 7px; }
+    .rc-foot-cookie svg { width: 15px; height: 15px; opacity: 0.8; }
+    @@media (max-width: 560px) { .rc-footer { justify-content: center; text-align: center; } }
 </style>
 
 <div class="rc-root">
@@ -256,6 +274,17 @@
         </div>
     </nav>
     @Body
+
+    <footer class="rc-footer">
+        <span class="rc-foot-note">
+            <span class="rc-foot-dot"></span>
+            © @DateTime.UtcNow.Year hodlbeatsbots.com · Reality Check
+        </span>
+        <span class="rc-foot-cookie">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.11-1.36a2.5 2.5 0 0 1-3.53-3.53A8.96 8.96 0 0 0 12 3zm-3 5a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm6 .5a1 1 0 1 1 0 2 1 1 0 0 1 0-2zM8.5 13a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm5.5 2a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg>
+            No cookies, no tracking, no accounts.
+        </span>
+    </footer>
 </div>
 
 @code {
