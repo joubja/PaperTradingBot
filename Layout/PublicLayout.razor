@@ -131,7 +131,9 @@
     .rc-reg-detail { font-size: 0.82rem; color: var(--muted); }
     .rc-reg-meta { font-size: 0.74rem; color: var(--faint); margin-top: 4px; }
 
-    .rc-chartwrap { margin-top: 22px; padding: 22px; border-radius: 18px; background: var(--glass); border: 1px solid var(--line); }
+    /* min-height reserves the ApexChart's space (Height=320 + title/sub/padding) so
+       the late-rendering chart doesn't shove anchored sections (e.g. #donate) down. */
+    .rc-chartwrap { margin-top: 22px; padding: 22px; border-radius: 18px; background: var(--glass); border: 1px solid var(--line); min-height: 440px; }
     .rc-chart-title { font-size: 0.95rem; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
     .rc-chart-sub { font-size: 0.82rem; color: var(--faint); margin-bottom: 12px; }
 
@@ -145,7 +147,7 @@
     .rc-point-t { font-size: 0.97rem; line-height: 1.55; color: var(--muted); }
     .rc-point-t b { color: var(--ink); font-weight: 600; }
 
-    .rc-donate { margin-top: 64px; padding: 30px; border-radius: 20px;
+    .rc-donate { margin-top: 64px; scroll-margin-top: 16px; padding: 30px; border-radius: 20px;
                  background: linear-gradient(135deg, rgba(124,92,255,0.08), rgba(247,147,26,0.05));
                  border: 1px solid var(--line); }
     .rc-addr { font-family: 'JetBrains Mono', monospace; color: var(--eth-2); font-size: 0.95rem;
