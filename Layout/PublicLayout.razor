@@ -184,8 +184,9 @@
     .rc-tile-sub { font-size: 0.82rem; color: var(--muted); margin-top: 2px; }
 
     /* ── Data table ───────────────────────────────────────── */
-    .rc-tablewrap { margin-top: 22px; border-radius: 16px; border: 1px solid var(--line); overflow: hidden; }
+    .rc-tablewrap { margin-top: 22px; border-radius: 16px; border: 1px solid var(--line); overflow-x: auto; -webkit-overflow-scrolling: touch; }
     table.rc-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    table.rc-table th, table.rc-table td { white-space: nowrap; }
     table.rc-table th { text-align: left; padding: 12px 16px; background: rgba(255,255,255,0.03); color: var(--muted);
                         font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
     table.rc-table td { padding: 11px 16px; border-top: 1px solid var(--line); color: var(--ink); font-family: 'JetBrains Mono', monospace; }
@@ -198,9 +199,9 @@
     .rc-kvrow { padding: 14px 18px; border-radius: 12px; background: var(--glass); border: 1px solid var(--line); }
     .rc-kvk { font-size: 0.8rem; color: var(--muted); } .rc-kvv { font-size: 1.15rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-top: 3px; }
 
-    /* ── Top navigation ───────────────────────────────────── */
+    /* ── Top navigation (scrolls away; bottom dock takes over) ─ */
     .rc-nav {
-        position: sticky; top: 0; z-index: 20;
+        position: relative;
         backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
         background: rgba(7,7,11,0.72); border-bottom: 1px solid var(--line);
     }
@@ -250,7 +251,31 @@
                    background: linear-gradient(120deg, var(--eth), var(--btc)); flex-shrink: 0; }
     .rc-foot-cookie { display: inline-flex; align-items: center; gap: 7px; }
     .rc-foot-cookie svg { width: 15px; height: 15px; opacity: 0.8; }
-    @@media (max-width: 560px) { .rc-footer { justify-content: center; text-align: center; } }
+    @@media (max-width: 560px) { .rc-footer { justify-content: center; text-align: center; padding-bottom: 92px; } }
+
+    /* ── Floating bottom dock (appears once top nav scrolls out of view) ── */
+    .rc-dock {
+        position: fixed; left: 50%; bottom: 18px; z-index: 40;
+        transform: translateX(-50%) translateY(170%);
+        display: flex; align-items: center; gap: 4px; padding: 7px;
+        border-radius: 16px; background: rgba(12,12,20,0.85); border: 1px solid var(--line);
+        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+        box-shadow: 0 18px 50px -18px rgba(0,0,0,0.85);
+        opacity: 0; pointer-events: none;
+        transition: transform .34s cubic-bezier(.22,1,.36,1), opacity .34s ease;
+    }
+    body.rc-show-dock .rc-dock {
+        transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: auto;
+    }
+    .rc-dock .rc-navlink { padding: 9px 14px; }
+    .rc-dock .rc-navlink.active { color: #fff; background: var(--glass); border-color: var(--line); }
+    .rc-dock .rc-donatebtn { margin-left: 4px; }
+    @@media (max-width: 560px) {
+        .rc-dock { left: 12px; right: 12px; bottom: 12px; transform: translateY(170%); justify-content: space-around; gap: 2px; }
+        body.rc-show-dock .rc-dock { transform: translateY(0); }
+        .rc-dock .rc-navlink { padding: 10px 12px; }
+    }
+    @@media (prefers-reduced-motion: reduce) { .rc-dock { transition: opacity .2s ease; } }
 </style>
 
 <div class="rc-root">
@@ -285,6 +310,22 @@
             No cookies, no tracking, no accounts.
         </span>
     </footer>
+
+    @* Floating dock — mirrors the top nav, slides up once the top nav scrolls away. *@
+    <div class="rc-dock" aria-label="Navigation">
+        <a class="rc-navlink @(IsActive("/") ? "active" : "")" href="/" aria-label="Reality Check">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+            <span class="rc-navlabel">Reality Check</span>
+        </a>
+        <a class="rc-navlink @(IsActive("/bots") ? "active" : "")" href="/bots/aether" aria-label="Bot Snapshots">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+            <span class="rc-navlabel">Bot Snapshots</span>
+        </a>
+        <a class="rc-donatebtn" href="/#donate" aria-label="Donate">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+            <span class="rc-navlabel">Donate</span>
+        </a>
+    </div>
 </div>
 
 @code {
